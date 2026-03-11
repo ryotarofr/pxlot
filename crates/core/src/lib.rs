@@ -156,7 +156,7 @@ impl Canvas {
     pub fn new(frame_width: u32, frame_height: u32) -> Self {
         let frame_width = frame_width.max(1);
         let frame_height = frame_height.max(1);
-        let margin = frame_width.max(frame_height);
+        let margin = frame_width.max(frame_height) * 3;
         let buf_w = frame_width + 2 * margin;
         let buf_h = frame_height + 2 * margin;
         let initial_layer = Layer::new("Layer 1", buf_w, buf_h);
@@ -405,8 +405,8 @@ mod tests {
     #[test]
     fn test_canvas_memory_usage() {
         let canvas = Canvas::new(32, 32);
-        // Buffer is 96x96 (margin=32), so memory = 96*96*4 = 36864
-        assert_eq!(canvas.memory_usage(), 96 * 96 * 4);
+        // margin = 32*3 = 96, buffer = 32 + 2*96 = 224x224
+        assert_eq!(canvas.memory_usage(), 224 * 224 * 4);
     }
 
     #[test]
@@ -414,10 +414,10 @@ mod tests {
         let canvas = Canvas::new(32, 32);
         assert_eq!(canvas.frame_width(), 32);
         assert_eq!(canvas.frame_height(), 32);
-        assert_eq!(canvas.frame_x, 32); // margin = 32
-        assert_eq!(canvas.frame_y, 32);
-        assert_eq!(canvas.width, 96);   // 32 + 2*32
-        assert_eq!(canvas.height, 96);
+        assert_eq!(canvas.frame_x, 96); // margin = 32*3
+        assert_eq!(canvas.frame_y, 96);
+        assert_eq!(canvas.width, 224);  // 32 + 2*96
+        assert_eq!(canvas.height, 224);
     }
 
     #[test]

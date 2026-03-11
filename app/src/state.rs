@@ -41,6 +41,13 @@ pub struct EditorState {
     pub onion_skin: bool,
     /// Number of onion skin frames to show before/after current.
     pub onion_skin_frames: u32,
+    /// Flag to center the view on the frame on the next render.
+    pub needs_center: bool,
+    /// Current hover pixel position in buffer coordinates (-1 = outside).
+    pub hover_x: i32,
+    pub hover_y: i32,
+    /// Whether the space key is held (for space+drag panning).
+    pub space_held: bool,
 }
 
 /// Clipboard data for copy/paste operations.
@@ -83,15 +90,19 @@ impl EditorState {
             status_message: None,
             onion_skin: false,
             onion_skin_frames: 1,
+            needs_center: true,
+            hover_x: -1,
+            hover_y: -1,
+            space_held: false,
         }
     }
 
-    pub fn canvas_display_width(&self) -> f64 {
-        self.canvas.width as f64 * self.zoom
-    }
-
-    pub fn canvas_display_height(&self) -> f64 {
-        self.canvas.height as f64 * self.zoom
+    /// Center the view on the frame area given the viewport dimensions.
+    pub fn center_on_frame(&mut self, viewport_w: f64, viewport_h: f64) {
+        let frame_cx = (self.canvas.frame_x as f64 + self.canvas.frame_width() as f64 / 2.0) * self.zoom;
+        let frame_cy = (self.canvas.frame_y as f64 + self.canvas.frame_height() as f64 / 2.0) * self.zoom;
+        self.pan_x = viewport_w / 2.0 - frame_cx;
+        self.pan_y = viewport_h / 2.0 - frame_cy;
     }
 
     /// Save the current canvas state back to the timeline's current frame.

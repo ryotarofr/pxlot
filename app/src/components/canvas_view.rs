@@ -12,11 +12,36 @@ use pixelforge_tools::{
 
 use crate::state::EditorState;
 
-/// Draw onion skin overlays for previous/next frames.
-fn draw_onion_skin(
-    ctx: &CanvasRenderingContext2d,
+/// Alpha-blend `src` over `dst` (both premultiplied-style RGBA), returns final RGBA bytes.
+#[inline]
+fn blend_over(dst: [u8; 4], src_r: u8, src_g: u8, src_b: u8, src_a: u8) -> [u8; 4] {
+    if src_a == 0 {
+        return dst;
+    }
+    if src_a == 255 {
+        return [src_r, src_g, src_b, 255];
+    }
+    let sa = src_a as f32 / 255.0;
+    let da = dst[3] as f32 / 255.0;
+    let out_a = sa + da * (1.0 - sa);
+    if out_a < 0.001 {
+        return [0, 0, 0, 0];
+    }
+    let r = (src_r as f32 * sa + dst[0] as f32 * da * (1.0 - sa)) / out_a;
+    let g = (src_g as f32 * sa + dst[1] as f32 * da * (1.0 - sa)) / out_a;
+    let b = (src_b as f32 * sa + dst[2] as f32 * da * (1.0 - sa)) / out_a;
+    [r as u8, g as u8, b as u8, (out_a * 255.0) as u8]
+}
+
+/// Draw onion skin into an image buffer (at 1:1 pixel scale).
+fn draw_onion_skin_to_buffer(
+    buf: &mut [u8],
+    buf_stride: usize,
     state: &EditorState,
-    zoom: f64,
+    vx0: i32,
+    vy0: i32,
+    vx1: i32,
+    vy1: i32,
 ) {
     if !state.onion_skin || state.timeline.frames.len() <= 1 {
         return;
@@ -25,9 +50,8 @@ fn draw_onion_skin(
     let total = state.timeline.frames.len();
     let n = state.onion_skin_frames as usize;
     let w = state.canvas.width;
-    let h = state.canvas.height;
 
-    // Draw previous frames (blue tint)
+    // Previous frames (blue tint)
     for offset in 1..=n {
         if offset > cur {
             break;
@@ -35,26 +59,27 @@ fn draw_onion_skin(
         let idx = cur - offset;
         let opacity = 0.25 / offset as f64;
         let flat = state.timeline.frames[idx].canvas.flatten_visible();
-        for y in 0..h {
-            for x in 0..w {
-                let i = ((y * w + x) as usize) * 4;
+        for y in vy0..vy1 {
+            for x in vx0..vx1 {
+                let i = ((y as u32 * w + x as u32) as usize) * 4;
                 let a = flat[i + 3];
                 if a > 0 {
-                    let style = format!(
-                        "rgba({},{},{},{})",
-                        (flat[i] as f64 * 0.3) as u8,
-                        (flat[i + 1] as f64 * 0.3) as u8,
-                        255,
-                        opacity * (a as f64 / 255.0)
-                    );
-                    ctx.set_fill_style_str(&style);
-                    ctx.fill_rect(x as f64 * zoom, y as f64 * zoom, zoom, zoom);
+                    let sa = (opacity * (a as f64 / 255.0) * 255.0) as u8;
+                    let sr = (flat[i] as f64 * 0.3) as u8;
+                    let sg = (flat[i + 1] as f64 * 0.3) as u8;
+                    let sb = 255u8;
+                    let bx = (x - vx0) as usize;
+                    let by = (y - vy0) as usize;
+                    let bi = (by * buf_stride + bx) * 4;
+                    let dst = [buf[bi], buf[bi + 1], buf[bi + 2], buf[bi + 3]];
+                    let out = blend_over(dst, sr, sg, sb, sa);
+                    buf[bi..bi + 4].copy_from_slice(&out);
                 }
             }
         }
     }
 
-    // Draw next frames (red tint)
+    // Next frames (red tint)
     for offset in 1..=n {
         let idx = cur + offset;
         if idx >= total {
@@ -62,20 +87,21 @@ fn draw_onion_skin(
         }
         let opacity = 0.25 / offset as f64;
         let flat = state.timeline.frames[idx].canvas.flatten_visible();
-        for y in 0..h {
-            for x in 0..w {
-                let i = ((y * w + x) as usize) * 4;
+        for y in vy0..vy1 {
+            for x in vx0..vx1 {
+                let i = ((y as u32 * w + x as u32) as usize) * 4;
                 let a = flat[i + 3];
                 if a > 0 {
-                    let style = format!(
-                        "rgba({},{},{},{})",
-                        255,
-                        (flat[i + 1] as f64 * 0.3) as u8,
-                        (flat[i + 2] as f64 * 0.3) as u8,
-                        opacity * (a as f64 / 255.0)
-                    );
-                    ctx.set_fill_style_str(&style);
-                    ctx.fill_rect(x as f64 * zoom, y as f64 * zoom, zoom, zoom);
+                    let sa = (opacity * (a as f64 / 255.0) * 255.0) as u8;
+                    let sr = 255u8;
+                    let sg = (flat[i + 1] as f64 * 0.3) as u8;
+                    let sb = (flat[i + 2] as f64 * 0.3) as u8;
+                    let bx = (x - vx0) as usize;
+                    let by = (y - vy0) as usize;
+                    let bi = (by * buf_stride + bx) * 4;
+                    let dst = [buf[bi], buf[bi + 1], buf[bi + 2], buf[bi + 3]];
+                    let out = blend_over(dst, sr, sg, sb, sa);
+                    buf[bi..bi + 4].copy_from_slice(&out);
                 }
             }
         }
@@ -106,74 +132,147 @@ pub fn CanvasView(
 
         let Some(ctx) = ctx else { return };
 
-        // Apply pan offset via CSS transform
-        editor.with_value(|state| {
-            let html_el: &web_sys::HtmlElement = html_canvas.unchecked_ref();
-            let css_style = html_el.style();
-            let _ = css_style.set_property(
-                "transform",
-                &format!("translate({}px, {}px)", state.pan_x, state.pan_y),
-            );
+        // Get viewport size from parent element
+        let element: &Element = html_canvas.unchecked_ref();
+        let parent = element.parent_element();
+        let (vp_w, vp_h) = if let Some(ref p) = parent {
+            (p.client_width() as f64, p.client_height() as f64)
+        } else {
+            (800.0, 600.0)
+        };
+
+        // Set canvas element to fill viewport
+        html_canvas.set_width(vp_w as u32);
+        html_canvas.set_height(vp_h as u32);
+
+        // Center on first render
+        editor.update_value(|state| {
+            if state.needs_center {
+                state.center_on_frame(vp_w, vp_h);
+                state.needs_center = false;
+            }
         });
 
+        // Update cursor style based on state
+        let cursor = editor.with_value(|state| {
+            if state.is_panning || state.space_held {
+                if state.is_panning { "grabbing" } else { "grab" }.to_string()
+            } else {
+                match state.current_tool {
+                    ToolKind::Eyedropper => "crosshair".to_string(),
+                    ToolKind::Fill => "cell".to_string(),
+                    _ => "crosshair".to_string(),
+                }
+            }
+        });
+        let html_el: &web_sys::HtmlElement = html_canvas.unchecked_ref();
+        let _ = html_el.style().set_property("cursor", &cursor);
+
         editor.with_value(|state| {
-            let cw = state.canvas_display_width();
-            let ch = state.canvas_display_height();
-
-            html_canvas.set_width(cw as u32);
-            html_canvas.set_height(ch as u32);
-
             let zoom = state.zoom;
+            let pan_x = state.pan_x;
+            let pan_y = state.pan_y;
             let fx0 = state.canvas.frame_x;
             let fy0 = state.canvas.frame_y;
             let fw = state.canvas.frame_width();
             let fh = state.canvas.frame_height();
+            let buf_w = state.canvas.width;
+            let buf_h = state.canvas.height;
 
-            // Clear entire canvas with margin background
-            ctx.set_fill_style_str("#1a1a2e");
-            ctx.fill_rect(0.0, 0.0, cw, ch);
+            // Clear entire viewport with uniform background
+            ctx.set_fill_style_str("#161628");
+            ctx.fill_rect(0.0, 0.0, vp_w, vp_h);
 
-            // Draw checkerboard only inside frame area
-            for y in 0..fh {
-                for x in 0..fw {
-                    let c1 = if (x + y) % 2 == 0 { "#2a2a3e" } else { "#222238" };
-                    ctx.set_fill_style_str(c1);
-                    ctx.fill_rect(
-                        (fx0 + x) as f64 * zoom,
-                        (fy0 + y) as f64 * zoom,
-                        zoom,
-                        zoom,
-                    );
-                }
-            }
+            // Calculate visible buffer pixel range (culling)
+            let vx0 = ((-pan_x) / zoom).floor() as i32;
+            let vy0 = ((-pan_y) / zoom).floor() as i32;
+            let vx1 = ((-pan_x + vp_w) / zoom).ceil() as i32;
+            let vy1 = ((-pan_y + vp_h) / zoom).ceil() as i32;
 
-            // Draw onion skin (previous/next frames) behind current frame
-            draw_onion_skin(&ctx, state, zoom);
+            // Clamp to buffer bounds
+            let vx0 = vx0.max(0).min(buf_w as i32);
+            let vy0 = vy0.max(0).min(buf_h as i32);
+            let vx1 = vx1.max(0).min(buf_w as i32);
+            let vy1 = vy1.max(0).min(buf_h as i32);
 
-            // Flatten and draw all visible layers (full buffer)
-            let flat = state.canvas.flatten_visible();
-            let w = state.canvas.width;
-            let h = state.canvas.height;
-            for y in 0..h {
-                for x in 0..w {
-                    let i = ((y * w + x) as usize) * 4;
-                    let a = flat[i + 3];
-                    if a > 0 {
-                        let style = format!(
-                            "rgba({},{},{},{})",
-                            flat[i],
-                            flat[i + 1],
-                            flat[i + 2],
-                            a as f64 / 255.0
-                        );
-                        ctx.set_fill_style_str(&style);
-                        ctx.fill_rect(
-                            x as f64 * zoom,
-                            y as f64 * zoom,
-                            zoom,
-                            zoom,
-                        );
+            let vis_w = (vx1 - vx0) as usize;
+            let vis_h = (vy1 - vy0) as usize;
+
+            if vis_w > 0 && vis_h > 0 {
+                // Build composited pixel buffer: checkerboard + pixel data
+                let mut img_data = vec![255u8; vis_w * vis_h * 4];
+
+                // Checkerboard colors
+                let cb_a: [u8; 3] = [0x1e, 0x1e, 0x38];
+                let cb_b: [u8; 3] = [0x1a, 0x1a, 0x32];
+
+                // Fill with checkerboard
+                for ly in 0..vis_h {
+                    let wy = vy0 + ly as i32;
+                    for lx in 0..vis_w {
+                        let wx = vx0 + lx as i32;
+                        let i = (ly * vis_w + lx) * 4;
+                        let cb = if ((wx + wy) % 2) == 0 { &cb_a } else { &cb_b };
+                        img_data[i] = cb[0];
+                        img_data[i + 1] = cb[1];
+                        img_data[i + 2] = cb[2];
+                        img_data[i + 3] = 255;
                     }
+                }
+
+                // Draw onion skin into buffer
+                draw_onion_skin_to_buffer(
+                    &mut img_data, vis_w, state, vx0, vy0, vx1, vy1,
+                );
+
+                // Blend pixel data on top
+                let flat = state.canvas.flatten_visible();
+                for ly in 0..vis_h {
+                    let wy = vy0 + ly as i32;
+                    for lx in 0..vis_w {
+                        let wx = vx0 + lx as i32;
+                        let fi = ((wy as u32 * buf_w + wx as u32) as usize) * 4;
+                        let a = flat[fi + 3];
+                        if a > 0 {
+                            let i = (ly * vis_w + lx) * 4;
+                            let dst = [img_data[i], img_data[i + 1], img_data[i + 2], img_data[i + 3]];
+                            let out = blend_over(dst, flat[fi], flat[fi + 1], flat[fi + 2], a);
+                            img_data[i..i + 4].copy_from_slice(&out);
+                        }
+                    }
+                }
+
+                // Create offscreen canvas and draw ImageData, then scale to viewport
+                let document = web_sys::window().unwrap().document().unwrap();
+                let offscreen: HtmlCanvasElement = document
+                    .create_element("canvas")
+                    .unwrap()
+                    .unchecked_into();
+                offscreen.set_width(vis_w as u32);
+                offscreen.set_height(vis_h as u32);
+                let off_ctx: CanvasRenderingContext2d = offscreen
+                    .get_context("2d")
+                    .ok()
+                    .flatten()
+                    .unwrap()
+                    .unchecked_into();
+
+                // Create ImageData from buffer
+                let clamped = wasm_bindgen::Clamped(&img_data[..]);
+                if let Ok(image_data) =
+                    web_sys::ImageData::new_with_u8_clamped_array_and_sh(clamped, vis_w as u32, vis_h as u32)
+                {
+                    let _ = off_ctx.put_image_data(&image_data, 0.0, 0.0);
+
+                    // Draw scaled to main canvas
+                    ctx.set_image_smoothing_enabled(false);
+                    let dx = vx0 as f64 * zoom + pan_x;
+                    let dy = vy0 as f64 * zoom + pan_y;
+                    let dw = vis_w as f64 * zoom;
+                    let dh = vis_h as f64 * zoom;
+                    let _ = ctx.draw_image_with_html_canvas_element_and_dw_and_dh(
+                        &offscreen, dx, dy, dw, dh,
+                    );
                 }
             }
 
@@ -221,11 +320,10 @@ pub fn CanvasView(
                     );
                     ctx.set_fill_style_str(&style);
                     for (px, py) in points {
-                        // Allow preview in full buffer area, not just frame
-                        if px >= 0 && py >= 0 && (px as u32) < w && (py as u32) < h {
+                        if px >= 0 && py >= 0 && (px as u32) < buf_w && (py as u32) < buf_h {
                             ctx.fill_rect(
-                                px as f64 * zoom,
-                                py as f64 * zoom,
+                                px as f64 * zoom + pan_x,
+                                py as f64 * zoom + pan_y,
                                 zoom,
                                 zoom,
                             );
@@ -248,7 +346,13 @@ pub fn CanvasView(
 
             // Draw selection rectangle
             if let Some((sx, sy, sw, sh)) = state.selection {
-                draw_dashed_rect(&ctx, sx as f64 * zoom, sy as f64 * zoom, sw as f64 * zoom, sh as f64 * zoom);
+                draw_dashed_rect(
+                    &ctx,
+                    sx as f64 * zoom + pan_x,
+                    sy as f64 * zoom + pan_y,
+                    sw as f64 * zoom,
+                    sh as f64 * zoom,
+                );
             }
 
             // Draw selection preview while dragging RectSelect
@@ -257,51 +361,162 @@ pub fn CanvasView(
                 let min_y = state.shape_start_y.min(state.last_draw_y);
                 let sel_w = (state.last_draw_x - state.shape_start_x).abs() + 1;
                 let sel_h = (state.last_draw_y - state.shape_start_y).abs() + 1;
-                draw_dashed_rect(&ctx, min_x as f64 * zoom, min_y as f64 * zoom, sel_w as f64 * zoom, sel_h as f64 * zoom);
+                draw_dashed_rect(
+                    &ctx,
+                    min_x as f64 * zoom + pan_x,
+                    min_y as f64 * zoom + pan_y,
+                    sel_w as f64 * zoom,
+                    sel_h as f64 * zoom,
+                );
             }
 
-            // Draw frame border (shows the export area)
-            ctx.set_stroke_style_str("rgba(0,100,200,0.7)");
-            ctx.set_line_width(1.0);
-            ctx.set_line_dash(&js_sys::Array::new()).ok();
-            ctx.stroke_rect(
-                fx0 as f64 * zoom - 0.5,
-                fy0 as f64 * zoom - 0.5,
-                fw as f64 * zoom + 1.0,
-                fh as f64 * zoom + 1.0,
-            );
-
-            // Draw grid (only inside frame area)
+            // Draw grid across entire visible area (batched paths)
             if state.show_grid && zoom >= 4.0 {
                 let gs = state.grid_size.max(1) as u32;
-                ctx.set_stroke_style_str("rgba(255,255,255,0.08)");
+
+                let gx0 = vx0 as u32;
+                let gy0 = vy0 as u32;
+                let gx1 = vx1 as u32;
+                let gy1 = vy1 as u32;
+                let gy0f = gy0 as f64 * zoom + pan_y;
+                let gy1f = gy1 as f64 * zoom + pan_y;
+                let gx0f = gx0 as f64 * zoom + pan_x;
+                let gx1f = gx1 as f64 * zoom + pan_x;
+
+                // Fine grid lines - single batched path
+                ctx.set_stroke_style_str("rgba(255,255,255,0.05)");
                 ctx.set_line_width(0.5);
-                let mut x = 0u32;
-                while x <= fw {
-                    ctx.begin_path();
-                    ctx.move_to((fx0 + x) as f64 * zoom, fy0 as f64 * zoom);
-                    ctx.line_to((fx0 + x) as f64 * zoom, (fy0 + fh) as f64 * zoom);
-                    ctx.stroke();
+                ctx.begin_path();
+
+                let start_x = (gx0 / gs) * gs;
+                let mut x = start_x;
+                while x <= gx1 {
+                    let xf = x as f64 * zoom + pan_x;
+                    ctx.move_to(xf, gy0f);
+                    ctx.line_to(xf, gy1f);
                     x += gs;
                 }
-                let mut y = 0u32;
-                while y <= fh {
-                    ctx.begin_path();
-                    ctx.move_to(fx0 as f64 * zoom, (fy0 + y) as f64 * zoom);
-                    ctx.line_to((fx0 + fw) as f64 * zoom, (fy0 + y) as f64 * zoom);
-                    ctx.stroke();
+                let start_y = (gy0 / gs) * gs;
+                let mut y = start_y;
+                while y <= gy1 {
+                    let yf = y as f64 * zoom + pan_y;
+                    ctx.move_to(gx0f, yf);
+                    ctx.line_to(gx1f, yf);
                     y += gs;
                 }
-                // Draw mirror axis if enabled (centered on frame)
-                if state.mirror_x {
-                    ctx.set_stroke_style_str("rgba(255,100,100,0.4)");
-                    ctx.set_line_width(1.0);
-                    let mid_x = (fx0 as f64 + fw as f64 / 2.0) * zoom;
-                    ctx.begin_path();
-                    ctx.move_to(mid_x, fy0 as f64 * zoom);
-                    ctx.line_to(mid_x, (fy0 + fh) as f64 * zoom);
-                    ctx.stroke();
+                ctx.stroke();
+
+                // Coarse grid lines (every 8 pixels) - single batched path
+                let coarse = (gs * 8).max(8);
+                ctx.set_stroke_style_str("rgba(255,255,255,0.10)");
+                ctx.set_line_width(0.5);
+                ctx.begin_path();
+
+                let start_cx = (gx0 / coarse) * coarse;
+                let mut cx = start_cx;
+                while cx <= gx1 {
+                    let xf = cx as f64 * zoom + pan_x;
+                    ctx.move_to(xf, gy0f);
+                    ctx.line_to(xf, gy1f);
+                    cx += coarse;
                 }
+                let start_cy = (gy0 / coarse) * coarse;
+                let mut cy = start_cy;
+                while cy <= gy1 {
+                    let yf = cy as f64 * zoom + pan_y;
+                    ctx.move_to(gx0f, yf);
+                    ctx.line_to(gx1f, yf);
+                    cy += coarse;
+                }
+                ctx.stroke();
+            }
+
+            // Frame boundary: smooth thick border lines
+            let frame_left = fx0 as f64 * zoom + pan_x;
+            let frame_top = fy0 as f64 * zoom + pan_y;
+            let frame_right = (fx0 + fw) as f64 * zoom + pan_x;
+            let frame_bottom = (fy0 + fh) as f64 * zoom + pan_y;
+
+            ctx.set_stroke_style_str("rgba(100,160,220,0.5)");
+            ctx.set_line_width(2.0);
+            ctx.set_line_dash(&js_sys::Array::new()).ok();
+            ctx.stroke_rect(
+                frame_left,
+                frame_top,
+                frame_right - frame_left,
+                frame_bottom - frame_top,
+            );
+
+            // Corner markers (small filled squares at each corner)
+            let corner_size = (zoom * 0.6).clamp(3.0, 12.0);
+            ctx.set_fill_style_str("rgba(80,140,200,0.7)");
+            ctx.fill_rect(frame_left - corner_size * 0.5, frame_top - corner_size * 0.5, corner_size, corner_size);
+            ctx.fill_rect(frame_right - corner_size * 0.5, frame_top - corner_size * 0.5, corner_size, corner_size);
+            ctx.fill_rect(frame_left - corner_size * 0.5, frame_bottom - corner_size * 0.5, corner_size, corner_size);
+            ctx.fill_rect(frame_right - corner_size * 0.5, frame_bottom - corner_size * 0.5, corner_size, corner_size);
+
+            // Dim area outside the frame (semi-transparent overlay)
+            {
+                ctx.set_fill_style_str("rgba(0,0,10,0.35)");
+                if frame_top > 0.0 {
+                    ctx.fill_rect(0.0, 0.0, vp_w, frame_top);
+                }
+                if frame_bottom < vp_h {
+                    ctx.fill_rect(0.0, frame_bottom, vp_w, vp_h - frame_bottom);
+                }
+                let strip_top = frame_top.max(0.0);
+                let strip_bottom = frame_bottom.min(vp_h);
+                if frame_left > 0.0 && strip_bottom > strip_top {
+                    ctx.fill_rect(0.0, strip_top, frame_left, strip_bottom - strip_top);
+                }
+                if frame_right < vp_w && strip_bottom > strip_top {
+                    ctx.fill_rect(frame_right, strip_top, vp_w - frame_right, strip_bottom - strip_top);
+                }
+            }
+
+            // Pixel cursor highlight
+            if state.hover_x >= 0 && state.hover_y >= 0
+                && (state.hover_x as u32) < buf_w && (state.hover_y as u32) < buf_h
+            {
+                let hx = state.hover_x as f64 * zoom + pan_x;
+                let hy = state.hover_y as f64 * zoom + pan_y;
+                ctx.set_stroke_style_str("rgba(255,255,255,0.6)");
+                ctx.set_line_width(1.0);
+                ctx.stroke_rect(hx + 0.5, hy + 0.5, zoom - 1.0, zoom - 1.0);
+            }
+
+            // Coordinate label near cursor (relative to frame origin)
+            if state.hover_x >= 0 && state.hover_y >= 0
+                && (state.hover_x as u32) < buf_w && (state.hover_y as u32) < buf_h
+            {
+                let rel_x = state.hover_x - fx0 as i32;
+                let rel_y = state.hover_y - fy0 as i32;
+                let label = format!("{},{}", rel_x, rel_y);
+                let lx = state.hover_x as f64 * zoom + pan_x + zoom + 6.0;
+                let ly = state.hover_y as f64 * zoom + pan_y - 4.0;
+                ctx.set_font("11px monospace");
+                let tw = label.len() as f64 * 6.6;
+                ctx.set_fill_style_str("rgba(0,0,0,0.7)");
+                ctx.fill_rect(lx - 2.0, ly - 10.0, tw + 4.0, 14.0);
+                let in_frame = rel_x >= 0 && rel_y >= 0
+                    && (rel_x as u32) < fw && (rel_y as u32) < fh;
+                if in_frame {
+                    ctx.set_fill_style_str("rgba(200,220,255,0.9)");
+                } else {
+                    ctx.set_fill_style_str("rgba(255,180,100,0.9)");
+                }
+                ctx.fill_text(&label, lx, ly).ok();
+            }
+
+            // Draw mirror axis if enabled (centered on frame)
+            if state.mirror_x {
+                ctx.set_stroke_style_str("rgba(255,100,100,0.4)");
+                ctx.set_line_width(1.0);
+                let mid_x = (fx0 as f64 + fw as f64 / 2.0) * zoom + pan_x;
+                ctx.begin_path();
+                ctx.move_to(mid_x, frame_top);
+                ctx.line_to(mid_x, frame_bottom);
+                ctx.stroke();
             }
         });
     };
@@ -320,10 +535,11 @@ pub fn CanvasView(
         let html_canvas: &HtmlCanvasElement = el.as_ref();
         let element: &Element = html_canvas.unchecked_ref();
         let rect = element.get_bounding_client_rect();
-        let zoom = editor.with_value(|s| s.zoom);
-        // Returns buffer coordinates (not frame coordinates)
-        let px = ((ev.client_x() as f64 - rect.left()) / zoom) as i32;
-        let py = ((ev.client_y() as f64 - rect.top()) / zoom) as i32;
+        let (zoom, pan_x, pan_y) = editor.with_value(|s| (s.zoom, s.pan_x, s.pan_y));
+        let sx = ev.client_x() as f64 - rect.left();
+        let sy = ev.client_y() as f64 - rect.top();
+        let px = ((sx - pan_x) / zoom).floor() as i32;
+        let py = ((sy - pan_y) / zoom).floor() as i32;
         (px, py)
     };
 
@@ -333,17 +549,16 @@ pub fn CanvasView(
         let right_click = ev.button() == 2;
 
         editor.update_value(|state| {
-            if ev.button() == 1 {
+            // Middle mouse button or space+left-click = panning
+            if ev.button() == 1 || (ev.button() == 0 && state.space_held) {
                 state.is_panning = true;
                 state.pan_last_mouse_x = ev.client_x() as f64;
                 state.pan_last_mouse_y = ev.client_y() as f64;
                 return;
             }
 
-            // Right-click always erases (transparent), regardless of tool
             let effective_tool = if right_click { ToolKind::Eraser } else { state.current_tool };
 
-            // Check if drawing tools can operate on the active layer
             let needs_draw = matches!(
                 effective_tool,
                 ToolKind::Pencil | ToolKind::Eraser | ToolKind::Fill
@@ -440,7 +655,12 @@ pub fn CanvasView(
     };
 
     let on_mousemove = move |ev: MouseEvent| {
-        // Handle panning with middle mouse button
+        let (hx, hy) = mouse_to_pixel(&ev);
+        editor.update_value(|state| {
+            state.hover_x = hx;
+            state.hover_y = hy;
+        });
+
         let is_panning = editor.with_value(|s| s.is_panning);
         if is_panning {
             editor.update_value(|state| {
@@ -455,7 +675,7 @@ pub fn CanvasView(
             return;
         }
 
-        let (px, py) = mouse_to_pixel(&ev);
+        let (px, py) = (hx, hy);
 
         editor.update_value(|state| {
             if !state.is_drawing {
@@ -589,7 +809,6 @@ pub fn CanvasView(
                         state.history.push(cmd);
                     }
                     ToolKind::RectSelect => {
-                        // Clamp selection to buffer bounds
                         let min_x = state.shape_start_x.min(state.last_draw_x).max(0);
                         let min_y = state.shape_start_y.min(state.last_draw_y).max(0);
                         let max_x = state.shape_start_x.max(state.last_draw_x)
@@ -622,27 +841,32 @@ pub fn CanvasView(
             let delta = if ev.delta_y() < 0.0 { 1.2 } else { 1.0 / 1.2 };
             let new_zoom = (old_zoom * delta).clamp(1.0, 64.0);
 
-            // Mouse position relative to the canvas element's bounding rect
             let mouse_x = ev.client_x() as f64 - rect.left();
             let mouse_y = ev.client_y() as f64 - rect.top();
 
-            // Adjust pan so the pixel under the cursor stays in place.
-            let cw = state.canvas.width as f64;
-            let ch = state.canvas.height as f64;
-            state.pan_x += mouse_x * (1.0 - new_zoom / old_zoom)
-                + cw * (new_zoom - old_zoom) / 2.0;
-            state.pan_y += mouse_y * (1.0 - new_zoom / old_zoom)
-                + ch * (new_zoom - old_zoom) / 2.0;
+            let world_x = (mouse_x - state.pan_x) / old_zoom;
+            let world_y = (mouse_y - state.pan_y) / old_zoom;
+
+            state.pan_x = mouse_x - world_x * new_zoom;
+            state.pan_y = mouse_y - world_y * new_zoom;
             state.zoom = new_zoom;
         });
         render();
     };
 
-    // Prevent default context menu on middle-click / right-click
     let on_auxclick = move |ev: MouseEvent| {
         if ev.button() == 1 {
             ev.prevent_default();
         }
+    };
+
+    let on_mouseleave_hover = move |ev: MouseEvent| {
+        on_mouseup(ev);
+        editor.update_value(|state| {
+            state.hover_x = -1;
+            state.hover_y = -1;
+        });
+        render();
     };
 
     let on_contextmenu = move |ev: MouseEvent| {
@@ -656,7 +880,7 @@ pub fn CanvasView(
             on:mousedown=on_mousedown
             on:mousemove=on_mousemove
             on:mouseup=on_mouseup
-            on:mouseleave=on_mouseup
+            on:mouseleave=on_mouseleave_hover
             on:wheel=on_wheel
             on:auxclick=on_auxclick
             on:contextmenu=on_contextmenu

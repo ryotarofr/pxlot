@@ -44,6 +44,8 @@ web-sys = { workspace = true, features = [
     "Window",
     "MouseEvent",
     "WheelEvent",
+    "HtmlElement",
+    "ImageData",
     "console",
 ] }
 js-sys = { workspace = true }

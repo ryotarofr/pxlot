@@ -391,6 +391,7 @@ fn App() -> impl IntoView {
                         state.timeline = pixelforge_animation::Timeline::new(canvas.clone());
                         state.canvas = canvas;
                         state.history = pixelforge_core::history::History::new();
+                        state.needs_center = true;
                     });
                     trigger_render();
                 }
@@ -717,7 +718,10 @@ fn App() -> impl IntoView {
             "ArrowRight" if !ctrl => on_next_frame.run(()),
             " " => {
                 ev.prevent_default();
-                on_toggle_play.run(());
+                // Space held = hand tool for panning
+                editor.update_value(|state| {
+                    state.space_held = true;
+                });
             }
             "c" | "C" if ctrl => {
                 ev.prevent_default();
@@ -798,15 +802,25 @@ fn App() -> impl IntoView {
                 });
                 trigger_render();
             }
+            "p" | "P" if !ctrl => {
+                on_toggle_play.run(());
+            }
             "Home" if !ctrl => {
-                // Reset pan to origin
+                // Center view on frame
                 editor.update_value(|state| {
-                    state.pan_x = 0.0;
-                    state.pan_y = 0.0;
+                    state.needs_center = true;
                 });
                 trigger_render();
             }
             _ => {}
+        }
+    };
+
+    let on_keyup = move |ev: web_sys::KeyboardEvent| {
+        if ev.key() == " " {
+            editor.update_value(|state| {
+                state.space_held = false;
+            });
         }
     };
 
@@ -819,7 +833,7 @@ fn App() -> impl IntoView {
     };
 
     view! {
-        <div class="app" tabindex="0" on:keydown=on_keydown>
+        <div class="app" tabindex="0" on:keydown=on_keydown on:keyup=on_keyup>
             <header class="menu-bar">
                 <span class="app-title">{move || t(lang.get(), "app_title")}</span>
                 <div class="menu-actions">
@@ -1026,6 +1040,7 @@ fn App() -> impl IntoView {
                                             state.canvas = canvas;
                                             state.history = pixelforge_core::history::History::new();
                                             state.selection = None;
+                                            state.needs_center = true;
                                         });
                                         set_show_new_dialog.set(false);
                                         trigger_render();
@@ -1095,6 +1110,7 @@ fn App() -> impl IntoView {
                                             state.timeline = pixelforge_animation::Timeline::new(new_canvas);
                                             state.history = pixelforge_core::history::History::new();
                                             state.selection = None;
+                                            state.needs_center = true;
                                         });
                                         set_show_resize_dialog.set(false);
                                         trigger_render();
@@ -1127,6 +1143,19 @@ fn App() -> impl IntoView {
                         }
                     })
                 }}
+                <span>
+                    {move || {
+                        editor.with_value(|s| {
+                            if s.hover_x >= 0 && s.hover_y >= 0 {
+                                let rx = s.hover_x - s.canvas.frame_x as i32;
+                                let ry = s.hover_y - s.canvas.frame_y as i32;
+                                format!("Pos: {},{}", rx, ry)
+                            } else {
+                                "Pos: --".to_string()
+                            }
+                        })
+                    }}
+                </span>
                 <span>{move || format!("Canvas: {}x{}", canvas_w_signal.get(), canvas_h_signal.get())}</span>
                 <span>{move || format!("Zoom: {}", zoom_display.get())}</span>
                 <span>{memory_display}</span>
