@@ -1,0 +1,34 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(rustc --version)",
+      "Bash(cargo --version)",
+      "Bash(rustup target list --installed)",
+      "Bash(trunk --version)",
+      "Bash(wasm-pack --version)",
+      "Bash(cargo install trunk)",
+      "Bash(cargo check --target wasm32-unknown-unknown)",
+      "Bash(cargo test -p pixelforge-core)",
+      "Bash(trunk build)",
+      "Bash(trunk build --help)",
+      "Bash(curl -s http://127.0.0.1:8080)",
+      "Bash(cargo doc -p leptos --target wasm32-unknown-unknown)",
+      "Read(//c/Users/ryory/work/rust/pxlot/$HOME/.cargo/registry/src/*/leptos-0.7*/src/**)",
+      "Read(//c/Users/ryory/work/rust/pxlot/$HOME/.cargo/registry/**)",
+      "Read(//c/Users/ryory/work/rust/pxlot/$USERPROFILE/.cargo/registry/src/*/leptos-0.7.*/**)",
+      "Read(//c/Users/ryory/.cargo/registry/src/**)",
+      "Bash(cargo test -p pixelforge-core -p pixelforge-tools)",
+      "Bash(cargo test -p pixelforge-formats)",
+      "Bash(cargo test --workspace)",
+      "Bash(where python python3 py)",
+      "Bash(node -e \":*)",
+      "Bash(find app/src crates/*/src -name \"*.rs\" -type f)",
+      "Bash(cargo test -p pixelforge-core -p pixelforge-formats -p pixelforge-animation)",
+      "Bash(cargo check)",
+      "Bash(cargo test)",
+      "Bash(cargo check --target wasm32-unknown-unknown -p pixelforge-app)",
+      "Bash(kill 1394)",
+      "Bash(cargo test:*)"
+    ]
+  }
+}

@@ -1,0 +1,35 @@
+[workspace]
+resolver = "2"
+members = [
+    "app",
+    "crates/core",
+    "crates/tools",
+    "crates/formats",
+    "crates/animation",
+    "crates/renderer",
+    "crates/wasm_bridge",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[workspace.dependencies]
+leptos = { version = "0.7", features = ["csr"] }
+wasm-bindgen = "0.2"
+web-sys = "0.3"
+js-sys = "0.3"
+log = "0.4"
+console_log = "1"
+console_error_panic_hook = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Internal crates
+pixelforge-core = { path = "crates/core" }
+pixelforge-tools = { path = "crates/tools" }
+pixelforge-formats = { path = "crates/formats" }
+pixelforge-animation = { path = "crates/animation" }
+pixelforge-renderer = { path = "crates/renderer" }
+pixelforge-wasm-bridge = { path = "crates/wasm_bridge" }

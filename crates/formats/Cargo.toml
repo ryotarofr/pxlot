@@ -1,0 +1,10 @@
+[package]
+name = "pixelforge-formats"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+pixelforge-core = { workspace = true }
+pixelforge-animation = { workspace = true }
+png = "0.17"
+gif = "0.13"

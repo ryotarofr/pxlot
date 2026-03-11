@@ -1,0 +1,7 @@
+[package]
+name = "pixelforge-tools"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+pixelforge-core = { workspace = true }

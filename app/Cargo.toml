@@ -1,0 +1,52 @@
+[package]
+name = "pixelforge-app"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+pixelforge-core = { workspace = true }
+pixelforge-tools = { workspace = true }
+pixelforge-formats = { workspace = true }
+pixelforge-animation = { workspace = true }
+pixelforge-renderer = { workspace = true }
+pixelforge-wasm-bridge = { workspace = true }
+leptos = { workspace = true }
+wasm-bindgen = { workspace = true }
+wasm-bindgen-futures = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+web-sys = { workspace = true, features = [
+    "Blob",
+    "BlobPropertyBag",
+    "CanvasRenderingContext2d",
+    "Document",
+    "DomRect",
+    "Element",
+    "File",
+    "FileList",
+    "FileReader",
+    "HtmlAnchorElement",
+    "HtmlCanvasElement",
+    "HtmlInputElement",
+    "DomStringList",
+    "IdbDatabase",
+    "IdbFactory",
+    "IdbObjectStore",
+    "IdbObjectStoreParameters",
+    "IdbOpenDbRequest",
+    "IdbRequest",
+    "IdbTransaction",
+    "IdbTransactionMode",
+    "KeyboardEvent",
+    "Navigator",
+    "Storage",
+    "Url",
+    "Window",
+    "MouseEvent",
+    "WheelEvent",
+    "console",
+] }
+js-sys = { workspace = true }
+log = { workspace = true }
+console_log = { workspace = true }
+console_error_panic_hook = { workspace = true }

@@ -1,0 +1,10 @@
+[build]
+target = "app/index.html"
+dist = "dist"
+
+[watch]
+watch = ["app/src", "crates", "styles", "app/index.html"]
+
+[serve]
+addresses = ["127.0.0.1"]
+port = 8080

@@ -1,0 +1,19 @@
+[package]
+name = "pixelforge-renderer"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+pixelforge-core = { workspace = true }
+wasm-bindgen = { workspace = true }
+web-sys = { workspace = true, features = [
+    "HtmlCanvasElement",
+    "WebGl2RenderingContext",
+    "WebGlProgram",
+    "WebGlShader",
+    "WebGlTexture",
+    "WebGlBuffer",
+    "WebGlUniformLocation",
+] }
+js-sys = { workspace = true }
+log = { workspace = true }

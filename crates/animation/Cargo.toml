@@ -1,0 +1,8 @@
+[package]
+name = "pixelforge-animation"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+pixelforge-core = { workspace = true }
+serde = { version = "1", features = ["derive"] }
