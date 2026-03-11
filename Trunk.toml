@@ -1,6 +1,7 @@
 [build]
 target = "app/index.html"
 dist = "dist"
+public_url = "/pxlot/"
 
 [watch]
 watch = ["app/src", "crates", "styles", "app/index.html"]
