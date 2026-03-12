@@ -11,45 +11,55 @@ use crate::ai::ChatMessage;
 use crate::state::EditorState;
 
 /// How often to send a canvas screenshot to the LLM (every N turns).
-const SEND_IMAGE_EVERY: usize = 3;
+const SEND_IMAGE_EVERY: usize = 5;
 
 /// Maximum turns before forcefully stopping.
-const MAX_TURNS: usize = 25;
+const MAX_TURNS: usize = 20;
 
 /// System prompt template.
 fn system_prompt(width: u32, height: u32) -> String {
     let xmax = width.saturating_sub(1);
     let ymax = height.saturating_sub(1);
     format!(
-        r##"You are a pixel art drawing assistant. You have a {width}x{height} pixel canvas.
+        r##"You are an expert pixel art drawing assistant. Canvas: {width}x{height} pixels.
 
-Coordinate system:
-- (0,0) is the top-left corner
-- x increases rightward, y increases downward
+## Coordinate System
+- (0,0) is the top-left corner; x increases right, y increases down
 - Valid range: x in [0, {xmax}], y in [0, {ymax}]
+- Colors: hex strings like "#ff0000" (red), "#000000" (black), "#ffffff" (white)
 
-Colors are specified as hex strings like "#ff0000" (red).
+## Drawing Workflow — Follow This Order
+1. **Plan first**: Decide on a limited color palette (4–8 colors). Sketch the major shapes mentally.
+2. **Background**: Fill the background first using `flood_fill` at (0,0) or `draw_filled_rect` covering the full canvas.
+3. **Large shapes**: Draw the main body/silhouette with `draw_filled_rect` or `draw_filled_ellipse`.
+4. **Outlines**: Add outlines with `draw_rect`, `draw_ellipse`, or `draw_line` in a dark color.
+5. **Details**: Add fine details last with `set_pixels` only for small accents (eyes, highlights, etc.).
+6. **Finish**: Call `finish` when the drawing is complete.
 
-Available tools:
-- set_pixels: Set individual pixels (batch multiple in one call for efficiency)
-- draw_line: Draw a line between two points
-- draw_rect / draw_filled_rect: Draw rectangle outline or filled
-- draw_ellipse / draw_filled_ellipse: Draw ellipse outline or filled
-- flood_fill: Fill a contiguous region
-- get_canvas_info: Get canvas dimensions and layer info
-- clear_canvas: Clear the active layer
-- add_layer: Add a new layer
-- select_layer: Switch active layer
-- finish: Call when done drawing (required to end)
+## Pixel Art Quality Rules
+- **Limited palette**: Use 4–8 colors max. Avoid gradients or too many shades.
+- **Strong silhouette**: The shape should be recognizable from its outline alone.
+- **Prefer primitives**: Use `draw_filled_rect`, `draw_filled_ellipse`, and `flood_fill` for bodies and fills. Reserve `set_pixels` for tiny details only — never use it for fills or large areas.
+- **Dark outlines**: A 1-pixel dark outline makes shapes pop and look polished.
+- **Consistent scale**: Keep proportions correct for the canvas size.
+- **Work large-to-small**: Background → large shapes → medium details → small details.
 
-Guidelines:
-- Work methodically: plan the drawing, then execute step by step
-- Use layers strategically (e.g. background, outline, detail)
-- Batch pixels in set_pixels when setting many individual pixels
-- Use shape tools (draw_rect, draw_filled_rect, draw_ellipse) for geometric shapes
-- Use flood_fill for large areas of solid color
-- Call finish when the drawing is complete
-- Keep pixel art style: limited colors, clean shapes, intentional pixel placement"##
+## Tool Guide
+- `flood_fill(x, y, color)` — Fill a large solid area. Use for backgrounds and enclosed shapes.
+- `draw_filled_rect(x0,y0,x1,y1,color)` — Best for rectangular bodies, backgrounds, large fills.
+- `draw_filled_ellipse(x0,y0,x1,y1,color)` — Circular/oval bodies (heads, wheels, planets).
+- `draw_rect(x0,y0,x1,y1,color)` — Outline of a rectangle.
+- `draw_ellipse(x0,y0,x1,y1,color)` — Outline of an ellipse.
+- `draw_line(x0,y0,x1,y1,color)` — Straight-line details (limbs, antennas, borders).
+- `set_pixels(pixels[])` — Individual pixels; use ONLY for small details (eyes, dots, highlights).
+- `clear_canvas()` — Wipe the layer. Use if you need to restart.
+- `finish(message)` — REQUIRED to end the session. Call exactly once when done.
+
+## Important
+- Start drawing immediately without asking for confirmation.
+- Do NOT use `set_pixels` to fill large areas — it wastes tokens and looks bad.
+- Aim to complete the drawing in 8–12 tool calls.
+- Each shape tool call counts as one step — plan efficiently."##
     )
 }
 
@@ -112,8 +122,8 @@ pub async fn run_agent(
             break;
         }
 
-        // Build API request from full conversation history
-        let api_messages = conversation.with_value(|msgs| msgs.clone());
+        // Build API request — strip old canvas images to save tokens
+        let api_messages = conversation.with_value(|msgs| strip_old_images(msgs));
         let request = MessagesRequest {
             model: model.clone(),
             max_tokens: 4096,
@@ -254,6 +264,55 @@ pub async fn run_agent(
     }
 
     set_running.set(false);
+}
+
+/// Remove canvas image blocks from all but the last message that contains one.
+///
+/// Canvas images are large base64 blobs. Keeping them in every turn of the
+/// conversation history causes input-token counts to explode. We only need
+/// the most recent image so the model can see the current state of the canvas.
+fn strip_old_images(msgs: &[ApiMessage]) -> Vec<ApiMessage> {
+    // Find the index of the last message that contains an image block.
+    let last_image_msg = msgs
+        .iter()
+        .rposition(|m| m.content.iter().any(|b| matches!(b, ContentBlock::Image { .. })));
+
+    let last = match last_image_msg {
+        Some(idx) => idx,
+        // No images in history at all — return a cheap clone.
+        None => return msgs.to_vec(),
+    };
+
+    msgs.iter()
+        .enumerate()
+        .filter_map(|(i, msg)| {
+            if i == last {
+                // Keep this message as-is (it holds the newest image).
+                return Some(msg.clone());
+            }
+            // For older messages: strip image blocks.
+            let has_image = msg.content.iter().any(|b| matches!(b, ContentBlock::Image { .. }));
+            if !has_image {
+                // No images to remove — cheap clone.
+                return Some(msg.clone());
+            }
+            let filtered: Vec<ContentBlock> = msg
+                .content
+                .iter()
+                .filter(|b| !matches!(b, ContentBlock::Image { .. }))
+                .cloned()
+                .collect();
+            // Drop the message entirely if stripping left it empty.
+            if filtered.is_empty() {
+                None
+            } else {
+                Some(ApiMessage {
+                    role: msg.role.clone(),
+                    content: filtered,
+                })
+            }
+        })
+        .collect()
 }
 
 /// Capture the current canvas as a base64 PNG image content block.
