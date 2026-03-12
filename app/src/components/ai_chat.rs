@@ -14,8 +14,6 @@ pub fn AiChat(
     messages: ReadSignal<Vec<ChatMessage>>,
     /// Whether the agent loop is running.
     is_running: ReadSignal<bool>,
-    /// Whether an API key is configured.
-    has_api_key: ReadSignal<bool>,
     /// Whether the panel is open.
     is_open: ReadSignal<bool>,
     /// Close the panel.
@@ -26,8 +24,6 @@ pub fn AiChat(
     on_stop: Callback<()>,
     /// Clear conversation.
     on_clear: Callback<()>,
-    /// Save API key.
-    on_save_api_key: Callback<String>,
     /// Change model.
     on_model_change: Callback<String>,
     /// Current model name.
@@ -36,8 +32,6 @@ pub fn AiChat(
     token_usage: ReadSignal<(usize, usize)>,
 ) -> impl IntoView {
     let (input_text, set_input_text) = signal(String::new());
-    let (show_key_input, set_show_key_input) = signal(false);
-    let (key_input, set_key_input) = signal(String::new());
     let (panel_width, set_panel_width) = signal(DEFAULT_WIDTH);
     let (is_resizing, set_is_resizing) = signal(false);
     let message_container_ref = NodeRef::<leptos::html::Div>::new();
@@ -108,15 +102,6 @@ pub fn AiChat(
         }
     };
 
-    let do_save_key = move || {
-        let key = key_input.get().trim().to_string();
-        if !key.is_empty() {
-            on_save_api_key.run(key);
-        }
-        set_show_key_input.set(false);
-        set_key_input.set(String::new());
-    };
-
     view! {
         <aside
             class="ai-chat-sidebar"
@@ -136,13 +121,6 @@ pub fn AiChat(
                 <div class="ai-chat-header-actions">
                     <button
                         class="ai-chat-icon-btn"
-                        title="API Key Settings"
-                        on:click=move |_| set_show_key_input.update(|v| *v = !*v)
-                    >
-                        {move || if has_api_key.get() { "K" } else { "K!" }}
-                    </button>
-                    <button
-                        class="ai-chat-icon-btn"
                         title="Clear Chat"
                         on:click=move |_| on_clear.run(())
                     >
@@ -157,33 +135,6 @@ pub fn AiChat(
                     </button>
                 </div>
             </div>
-
-            // API Key input (toggled)
-            {move || {
-                if show_key_input.get() {
-                    Some(view! {
-                        <div class="ai-key-section">
-                            <input
-                                type="password"
-                                class="ai-key-input"
-                                placeholder="sk-ant-..."
-                                prop:value=move || key_input.get()
-                                on:input=move |ev| set_key_input.set(event_target_value(&ev))
-                                on:keydown=move |ev: web_sys::KeyboardEvent| {
-                                    if ev.key() == "Enter" {
-                                        do_save_key();
-                                    }
-                                }
-                            />
-                            <button class="ai-key-save-btn" on:click=move |_| do_save_key()>
-                                "Save"
-                            </button>
-                        </div>
-                    })
-                } else {
-                    None
-                }
-            }}
 
             // Model selector
             <div class="ai-model-select">
@@ -240,16 +191,14 @@ pub fn AiChat(
                 <textarea
                     class="ai-chat-input"
                     placeholder=move || {
-                        if !has_api_key.get() {
-                            "Set API key first (K button)"
-                        } else if is_running.get() {
+                        if is_running.get() {
                             "AI is working..."
                         } else {
                             "Describe pixel art to create..."
                         }
                     }
                     prop:value=move || input_text.get()
-                    prop:disabled=move || is_running.get() || !has_api_key.get()
+                    prop:disabled=move || is_running.get()
                     on:input=move |ev| set_input_text.set(event_target_value(&ev))
                     on:keydown=on_input_keydown
                     rows="3"
@@ -270,7 +219,7 @@ pub fn AiChat(
                                 <button
                                     class="ai-chat-send-btn"
                                     prop:disabled=move || {
-                                        input_text.get().trim().is_empty() || !has_api_key.get()
+                                        input_text.get().trim().is_empty()
                                     }
                                     on:click=move |_| do_send()
                                 >

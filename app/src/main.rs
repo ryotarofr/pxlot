@@ -118,35 +118,61 @@ fn App() -> impl IntoView {
     // AI Chat signals
     let (chat_messages, set_chat_messages) = signal(Vec::<ai::ChatMessage>::new());
     let (ai_running, set_ai_running) = signal(false);
-    let (ai_has_key, set_ai_has_key) = signal(ai::load_api_key().is_some());
     let (ai_model, set_ai_model) = signal("claude-sonnet-4-6".to_string());
     let (ai_token_usage, set_ai_token_usage) = signal((0usize, 0usize));
     let (chat_open, set_chat_open) = signal(false);
+    let ai_stop_flag = ai::agent::new_stop_flag();
+    let ai_conversation = StoredValue::new(Vec::<ai::api_client::ApiMessage>::new());
 
     // AI Chat callbacks
+    let stop_flag_for_send = ai_stop_flag.clone();
     let on_chat_send = Callback::new(move |text: String| {
-        // Add user message
+        // Prevent double execution
+        if ai_running.get() {
+            return;
+        }
+
+        // Add user message to chat
         set_chat_messages.update(|msgs| {
             msgs.push(ai::ChatMessage::user(&text));
         });
-        // TODO: trigger agent loop (Phase 2)
-        set_chat_messages.update(|msgs| {
-            msgs.push(ai::ChatMessage::status("Agent not yet connected. API integration coming soon."));
-        });
+
+        // Get API key
+        let Some(api_key) = ai::load_api_key() else {
+            set_chat_messages.update(|msgs| {
+                msgs.push(ai::ChatMessage::status("No API key configured."));
+            });
+            return;
+        };
+
+        let model = ai_model.get();
+        let stop = stop_flag_for_send.clone();
+        stop.store(false, std::sync::atomic::Ordering::Relaxed);
+
+        // Spawn the async agent loop
+        wasm_bindgen_futures::spawn_local(ai::agent::run_agent(
+            text,
+            api_key,
+            model,
+            editor,
+            ai_conversation,
+            set_chat_messages,
+            set_ai_running,
+            set_ai_token_usage,
+            set_render_trigger,
+            stop,
+        ));
     });
 
+    let stop_flag_for_stop = ai_stop_flag.clone();
     let on_chat_stop = Callback::new(move |_: ()| {
-        set_ai_running.set(false);
+        stop_flag_for_stop.store(true, std::sync::atomic::Ordering::Relaxed);
     });
 
     let on_chat_clear = Callback::new(move |_: ()| {
         set_chat_messages.set(Vec::new());
         set_ai_token_usage.set((0, 0));
-    });
-
-    let on_chat_save_key = Callback::new(move |key: String| {
-        ai::save_api_key(&key);
-        set_ai_has_key.set(true);
+        ai_conversation.set_value(Vec::new());
     });
 
     let on_chat_model_change = Callback::new(move |model: String| {
@@ -244,6 +270,12 @@ fn App() -> impl IntoView {
             storage::autosave(&state.canvas, &state.history);
         });
     };
+
+    // Sync UI state whenever render_trigger changes (covers agent-driven updates)
+    Effect::new(move |_| {
+        let _ = render_trigger.get(); // subscribe to changes
+        sync_state();
+    });
 
     // Sync tool/color changes to editor state
     Effect::new(move |_| {
@@ -1018,13 +1050,11 @@ fn App() -> impl IntoView {
                 <AiChat
                     messages=chat_messages
                     is_running=ai_running
-                    has_api_key=ai_has_key
                     is_open=chat_open
                     on_close=on_close_chat
                     on_send=on_chat_send
                     on_stop=on_chat_stop
                     on_clear=on_chat_clear
-                    on_save_api_key=on_chat_save_key
                     on_model_change=on_chat_model_change
                     model=ai_model
                     token_usage=ai_token_usage

@@ -1,6 +1,9 @@
 /// AI agent module: chat-based pixel art generation via LLM.
 
+pub mod agent;
+pub mod api_client;
 mod message;
+pub mod tools;
 
 pub use message::*;
 
@@ -56,21 +59,12 @@ impl AgentState {
     }
 }
 
-/// Persist / load API key from localStorage.
-pub fn save_api_key(key: &str) {
-    if let Some(storage) = web_sys::window()
-        .and_then(|w| w.local_storage().ok())
-        .flatten()
-    {
-        let _ = storage.set_item("pxlot_ai_api_key", key);
-    }
-}
-
+/// Load API key from compile-time environment variable.
+///
+/// Set `ANTHROPIC_API_KEY` when building:
+///   ANTHROPIC_API_KEY=sk-ant-... trunk serve
 pub fn load_api_key() -> Option<String> {
-    web_sys::window()
-        .and_then(|w| w.local_storage().ok())
-        .flatten()
-        .and_then(|s| s.get_item("pxlot_ai_api_key").ok())
-        .flatten()
+    option_env!("ANTHROPIC_API_KEY")
         .filter(|k| !k.is_empty())
+        .map(|k| k.to_string())
 }
