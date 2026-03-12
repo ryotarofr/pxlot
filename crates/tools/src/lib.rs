@@ -1,5 +1,5 @@
-use pixelforge_core::{Canvas, Color};
-use pixelforge_core::history::Command;
+use pxlot_core::{Canvas, Color};
+use pxlot_core::history::Command;
 use std::collections::VecDeque;
 
 /// Available drawing tools.

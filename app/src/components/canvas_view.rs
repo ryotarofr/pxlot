@@ -2,15 +2,16 @@ use leptos::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{CanvasRenderingContext2d, Element, HtmlCanvasElement, MouseEvent, WheelEvent};
 
-use pixelforge_core::history::Command;
-use pixelforge_core::Color;
-use pixelforge_tools::{
+use pxlot_core::history::Command;
+use pxlot_core::Color;
+use pxlot_tools::{
     check_drawable, draw_ellipse, draw_filled_ellipse, draw_filled_rect, draw_line, draw_rect,
     ellipse_points, eyedropper, filled_ellipse_points, filled_rect_points, flood_fill,
     line_points, pencil_line, pencil_pixel, rect_points, ToolKind,
 };
 
 use crate::state::EditorState;
+use crate::storage;
 
 /// Alpha-blend `src` over `dst` (both premultiplied-style RGBA), returns final RGBA bytes.
 #[inline]
@@ -49,7 +50,7 @@ fn draw_onion_skin_to_buffer(
     let cur = state.timeline.current_frame;
     let total = state.timeline.frames.len();
     let n = state.onion_skin_frames as usize;
-    let w = state.canvas.width;
+    let rw = (vx1 - vx0) as usize;
 
     // Previous frames (blue tint)
     for offset in 1..=n {
@@ -58,19 +59,19 @@ fn draw_onion_skin_to_buffer(
         }
         let idx = cur - offset;
         let opacity = 0.25 / offset as f64;
-        let flat = state.timeline.frames[idx].canvas.flatten_visible();
-        for y in vy0..vy1 {
-            for x in vx0..vx1 {
-                let i = ((y as u32 * w + x as u32) as usize) * 4;
+        let flat = state.timeline.frames[idx].canvas.flatten_region(
+            vx0 as u32, vy0 as u32, vx1 as u32, vy1 as u32,
+        );
+        for ly in 0..((vy1 - vy0) as usize) {
+            for lx in 0..rw {
+                let i = (ly * rw + lx) * 4;
                 let a = flat[i + 3];
                 if a > 0 {
                     let sa = (opacity * (a as f64 / 255.0) * 255.0) as u8;
                     let sr = (flat[i] as f64 * 0.3) as u8;
                     let sg = (flat[i + 1] as f64 * 0.3) as u8;
                     let sb = 255u8;
-                    let bx = (x - vx0) as usize;
-                    let by = (y - vy0) as usize;
-                    let bi = (by * buf_stride + bx) * 4;
+                    let bi = (ly * buf_stride + lx) * 4;
                     let dst = [buf[bi], buf[bi + 1], buf[bi + 2], buf[bi + 3]];
                     let out = blend_over(dst, sr, sg, sb, sa);
                     buf[bi..bi + 4].copy_from_slice(&out);
@@ -86,19 +87,19 @@ fn draw_onion_skin_to_buffer(
             break;
         }
         let opacity = 0.25 / offset as f64;
-        let flat = state.timeline.frames[idx].canvas.flatten_visible();
-        for y in vy0..vy1 {
-            for x in vx0..vx1 {
-                let i = ((y as u32 * w + x as u32) as usize) * 4;
+        let flat = state.timeline.frames[idx].canvas.flatten_region(
+            vx0 as u32, vy0 as u32, vx1 as u32, vy1 as u32,
+        );
+        for ly in 0..((vy1 - vy0) as usize) {
+            for lx in 0..rw {
+                let i = (ly * rw + lx) * 4;
                 let a = flat[i + 3];
                 if a > 0 {
                     let sa = (opacity * (a as f64 / 255.0) * 255.0) as u8;
                     let sr = 255u8;
                     let sg = (flat[i + 1] as f64 * 0.3) as u8;
                     let sb = (flat[i + 2] as f64 * 0.3) as u8;
-                    let bx = (x - vx0) as usize;
-                    let by = (y - vy0) as usize;
-                    let bi = (by * buf_stride + bx) * 4;
+                    let bi = (ly * buf_stride + lx) * 4;
                     let dst = [buf[bi], buf[bi + 1], buf[bi + 2], buf[bi + 3]];
                     let out = blend_over(dst, sr, sg, sb, sa);
                     buf[bi..bi + 4].copy_from_slice(&out);
@@ -225,16 +226,14 @@ pub fn CanvasView(
                     &mut img_data, vis_w, state, vx0, vy0, vx1, vy1,
                 );
 
-                // Blend pixel data on top
-                let flat = state.canvas.flatten_visible();
+                // Blend pixel data on top (only visible region)
+                let flat = state.canvas.flatten_region(vx0 as u32, vy0 as u32, vx1 as u32, vy1 as u32);
                 for ly in 0..vis_h {
-                    let wy = vy0 + ly as i32;
                     for lx in 0..vis_w {
-                        let wx = vx0 + lx as i32;
-                        let fi = ((wy as u32 * buf_w + wx as u32) as usize) * 4;
+                        let fi = (ly * vis_w + lx) * 4;
                         let a = flat[fi + 3];
                         if a > 0 {
-                            let i = (ly * vis_w + lx) * 4;
+                            let i = fi;
                             let dst = [img_data[i], img_data[i + 1], img_data[i + 2], img_data[i + 3]];
                             let out = blend_over(dst, flat[fi], flat[fi + 1], flat[fi + 2], a);
                             img_data[i..i + 4].copy_from_slice(&out);
@@ -545,6 +544,13 @@ pub fn CanvasView(
 
     let on_mousedown = move |ev: MouseEvent| {
         ev.prevent_default();
+        // Ensure the parent .app div keeps focus for keyboard shortcuts
+        let target_js = ev.target().unwrap();
+        let target: &Element = target_js.unchecked_ref();
+        if let Some(app_div) = target.closest(".app").ok().flatten() {
+            let html_el: &web_sys::HtmlElement = app_div.unchecked_ref();
+            let _ = html_el.focus();
+        }
         let (px, py) = mouse_to_pixel(&ev);
         let right_click = ev.button() == 2;
 
@@ -652,6 +658,10 @@ pub fn CanvasView(
             }
         });
         render();
+        // Autosave after immediate operations (fill, etc.)
+        editor.with_value(|state| {
+            storage::autosave(&state.canvas, &state.history);
+        });
     };
 
     let on_mousemove = move |ev: MouseEvent| {
@@ -827,6 +837,10 @@ pub fn CanvasView(
             state.is_panning = false;
         });
         render();
+        // Autosave after drawing completes
+        editor.with_value(|state| {
+            storage::autosave(&state.canvas, &state.history);
+        });
     };
 
     let on_wheel = move |ev: WheelEvent| {

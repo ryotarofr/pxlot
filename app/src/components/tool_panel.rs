@@ -1,5 +1,5 @@
 use leptos::prelude::*;
-use pixelforge_tools::ToolKind;
+use pxlot_tools::ToolKind;
 
 #[component]
 pub fn ToolPanel(

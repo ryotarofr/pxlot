@@ -1,4 +1,4 @@
-use pixelforge_core::{Canvas, Color};
+use pxlot_core::{Canvas, Color};
 
 /// Maximum canvas area for SVG export (256x256 = 65536 pixels).
 const MAX_SVG_PIXELS: u32 = 256 * 256;
@@ -61,7 +61,7 @@ pub fn export_svg(canvas: &Canvas) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pixelforge_core::{Canvas, Color};
+    use pxlot_core::{Canvas, Color};
 
     #[test]
     fn test_empty_canvas() {

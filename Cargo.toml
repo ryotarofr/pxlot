@@ -27,9 +27,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 # Internal crates
-pixelforge-core = { path = "crates/core" }
-pixelforge-tools = { path = "crates/tools" }
-pixelforge-formats = { path = "crates/formats" }
-pixelforge-animation = { path = "crates/animation" }
-pixelforge-renderer = { path = "crates/renderer" }
-pixelforge-wasm-bridge = { path = "crates/wasm_bridge" }
+pxlot-core = { path = "crates/core" }
+pxlot-tools = { path = "crates/tools" }
+pxlot-formats = { path = "crates/formats" }
+pxlot-animation = { path = "crates/animation" }
+pxlot-renderer = { path = "crates/renderer" }
+pxlot-wasm-bridge = { path = "crates/wasm_bridge" }

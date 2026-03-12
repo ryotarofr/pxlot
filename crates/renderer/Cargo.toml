@@ -1,10 +1,10 @@
 [package]
-name = "pixelforge-renderer"
+name = "pxlot-renderer"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
-pixelforge-core = { workspace = true }
+pxlot-core = { workspace = true }
 wasm-bindgen = { workspace = true }
 web-sys = { workspace = true, features = [
     "HtmlCanvasElement",

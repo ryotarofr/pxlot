@@ -1,4 +1,4 @@
-use pixelforge_core::{Canvas, Color, Layer};
+use pxlot_core::{Canvas, Color, Layer};
 use std::io::Cursor;
 
 /// Export the flattened canvas to PNG bytes at 1x scale.

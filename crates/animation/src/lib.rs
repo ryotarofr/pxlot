@@ -1,4 +1,4 @@
-use pixelforge_core::Canvas;
+use pxlot_core::Canvas;
 use serde::{Deserialize, Serialize};
 
 /// A single animation frame holding a snapshot of all layers.

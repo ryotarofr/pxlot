@@ -5,16 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#4a9eff" />
     <meta name="description" content="Browser-based pixel art editor with AI features" />
-    <title>PixelForge</title>
+    <title>pxlot</title>
     <link rel="manifest" href="manifest.json" />
     <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
     <link rel="apple-touch-icon" href="icon-192.png" />
-    <link rel="stylesheet" href="/main-3a0869faeab44931.css" integrity="sha384-vKELh6HygNWRNp7hQW+We/mXqAIKMENA67hvwQbeU5a9CE/MR9AqTztI41tFTdw9"/>
+    <link rel="stylesheet" href="/pxlot/main-aeeca5a68d376570.css" integrity="sha384-eu0TrHVr6uOUpK/LDaj2Id+z6pnNE4aUptcoAGSHW7QTlCN8uUH9HyOvyFLq/5mG"/>
     
     
     
     
-<link rel="modulepreload" href="/pixelforge-app-93ab32ac7fde1738.js" crossorigin="anonymous" integrity="sha384-P+vWGmq15kstPWMbNrYzFY6TG61fkuZNgstpBDwqweTQu/l7Tv/30kjvyMSmvjRi"><link rel="preload" href="/pixelforge-app-93ab32ac7fde1738_bg.wasm" crossorigin="anonymous" integrity="sha384-ULlXTVI8yfSwhz/iOiUWsixAKU7ECmckqTCdMNcVjsFKpzyGggPysMGeJ2a6qisH" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/pxlot/pxlot-app-6a65bc21af5b4348.js" crossorigin="anonymous" integrity="sha384-QbCidsQJODinM+st8C7oSWWxfJ868cYlIv0ImuEWjgigOnYzTJwW8X/hqBtkRLu/"><link rel="preload" href="/pxlot/pxlot-app-6a65bc21af5b4348_bg.wasm" crossorigin="anonymous" integrity="sha384-NDR67Y9TNSrnTFV+SEdrFN/Mgg/5YatTOQ9gS+z4DkadOknh3op7uQVWFHzO1JAF" as="fetch" type="application/wasm"></head>
 <body>
 <script>
 if ('serviceWorker' in navigator) {
@@ -25,8 +25,8 @@ if ('serviceWorker' in navigator) {
 </script>
 
 <script type="module">
-import init, * as bindings from '/pixelforge-app-93ab32ac7fde1738.js';
-const wasm = await init({ module_or_path: '/pixelforge-app-93ab32ac7fde1738_bg.wasm' });
+import init, * as bindings from '/pxlot/pxlot-app-6a65bc21af5b4348.js';
+const wasm = await init({ module_or_path: '/pxlot/pxlot-app-6a65bc21af5b4348_bg.wasm' });
 
 
 window.wasmBindings = bindings;

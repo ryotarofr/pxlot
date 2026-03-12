@@ -156,7 +156,8 @@ impl Canvas {
     pub fn new(frame_width: u32, frame_height: u32) -> Self {
         let frame_width = frame_width.max(1);
         let frame_height = frame_height.max(1);
-        let margin = frame_width.max(frame_height) * 3;
+        // Margin for pan/zoom working area, capped to avoid memory explosion on large imports.
+        let margin = (frame_width.max(frame_height)).min(64);
         let buf_w = frame_width + 2 * margin;
         let buf_h = frame_height + 2 * margin;
         let initial_layer = Layer::new("Layer 1", buf_w, buf_h);
@@ -319,6 +320,55 @@ impl Canvas {
         result
     }
 
+    /// Flatten visible layers for a sub-region of the buffer into RGBA bytes.
+    /// The output is `(region_w * region_h * 4)` bytes, row-major.
+    pub fn flatten_region(&self, rx0: u32, ry0: u32, rx1: u32, ry1: u32) -> Vec<u8> {
+        let rx0 = rx0.min(self.width);
+        let ry0 = ry0.min(self.height);
+        let rx1 = rx1.min(self.width);
+        let ry1 = ry1.min(self.height);
+        let rw = rx1.saturating_sub(rx0) as usize;
+        let rh = ry1.saturating_sub(ry0) as usize;
+        let size = rw * rh;
+        let mut result = vec![0u8; size * 4];
+
+        for layer in &self.layers {
+            if !layer.visible || layer.opacity == 0 {
+                continue;
+            }
+            let layer_opacity = layer.opacity as f64 / 255.0;
+            let bw = self.width as usize;
+            for ry in 0..rh {
+                let by = ry0 as usize + ry;
+                for rx in 0..rw {
+                    let bx = rx0 as usize + rx;
+                    let buf_i = by * bw + bx;
+                    let src = &layer.buffer.pixels[buf_i];
+                    if src.a == 0 {
+                        continue;
+                    }
+                    let sa = (src.a as f64 / 255.0) * layer_opacity;
+                    let di = (ry * rw + rx) * 4;
+                    let dr = result[di] as f64 / 255.0;
+                    let dg = result[di + 1] as f64 / 255.0;
+                    let db = result[di + 2] as f64 / 255.0;
+                    let da = result[di + 3] as f64 / 255.0;
+
+                    let (sr, sg, sb) = (src.r as f64 / 255.0, src.g as f64 / 255.0, src.b as f64 / 255.0);
+
+                    let out_a = sa + da * (1.0 - sa);
+                    if out_a > 0.0 {
+                        result[di] = ((sr * sa + dr * da * (1.0 - sa)) / out_a * 255.0) as u8;
+                        result[di + 1] = ((sg * sa + dg * da * (1.0 - sa)) / out_a * 255.0) as u8;
+                        result[di + 2] = ((sb * sa + db * da * (1.0 - sa)) / out_a * 255.0) as u8;
+                        result[di + 3] = (out_a * 255.0) as u8;
+                    }
+                }
+            }
+        }
+        result
+    }
+
     /// Flatten only the frame region into RGBA bytes (for export).
     pub fn flatten_frame_visible(&self) -> Vec<u8> {
         let fw = self.frame_width();
@@ -405,8 +455,8 @@ mod tests {
     #[test]
     fn test_canvas_memory_usage() {
         let canvas = Canvas::new(32, 32);
-        // margin = 32*3 = 96, buffer = 32 + 2*96 = 224x224
-        assert_eq!(canvas.memory_usage(), 224 * 224 * 4);
+        // margin = min(32, 64) = 32, buffer = 32 + 2*32 = 96x96
+        assert_eq!(canvas.memory_usage(), 96 * 96 * 4);
     }
 
     #[test]
@@ -414,10 +464,10 @@ mod tests {
         let canvas = Canvas::new(32, 32);
         assert_eq!(canvas.frame_width(), 32);
         assert_eq!(canvas.frame_height(), 32);
-        assert_eq!(canvas.frame_x, 96); // margin = 32*3
-        assert_eq!(canvas.frame_y, 96);
-        assert_eq!(canvas.width, 224);  // 32 + 2*96
-        assert_eq!(canvas.height, 224);
+        assert_eq!(canvas.frame_x, 32); // margin = min(32, 64) = 32
+        assert_eq!(canvas.frame_y, 32);
+        assert_eq!(canvas.width, 96);   // 32 + 2*32
+        assert_eq!(canvas.height, 96);
     }
 
     #[test]

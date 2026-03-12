@@ -1,7 +1,7 @@
 [package]
-name = "pixelforge-tools"
+name = "pxlot-tools"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
-pixelforge-core = { workspace = true }
+pxlot-core = { workspace = true }

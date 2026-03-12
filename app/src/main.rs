@@ -14,17 +14,17 @@ use components::color_picker::ColorPicker;
 use components::layer_panel::{LayerInfo, LayerPanel};
 use components::timeline::TimelinePanel;
 use components::tool_panel::ToolPanel;
-use pixelforge_core::image_processing::{self, DitherMethod, DownsampleMethod}; // DownsampleMethod used internally
-use pixelforge_core::Color;
-use pixelforge_formats::{gif_format, png_format};
-use pixelforge_tools::{apply_redo, apply_undo, ToolKind};
+use pxlot_core::image_processing::{self, DitherMethod, DownsampleMethod}; // DownsampleMethod used internally
+use pxlot_core::Color;
+use pxlot_formats::{gif_format, png_format};
+use pxlot_tools::{apply_redo, apply_undo, ToolKind};
 use i18n::{t, Lang};
 use state::EditorState;
 
 fn main() {
     console_error_panic_hook::set_once();
     _ = console_log::init_with_level(log::Level::Debug);
-    log::info!("PixelForge starting...");
+    log::info!("pxlot starting...");
     mount_to_body(App);
 }
 
@@ -65,7 +65,11 @@ fn App() -> impl IntoView {
         let h = saved.frame_height();
         let mut state = EditorState::new(w, h);
         state.canvas = saved.clone();
-        state.timeline = pixelforge_animation::Timeline::new(saved);
+        state.timeline = pxlot_animation::Timeline::new(saved);
+        // Restore undo/redo history if available
+        if let Some(history) = storage::load_history() {
+            state.history = history;
+        }
         (w, h, StoredValue::new(state))
     } else {
         let w = 32u32;
@@ -132,7 +136,7 @@ fn App() -> impl IntoView {
     let (onion_skin_frames, set_onion_skin_frames) = signal(1u32);
 
     // Custom export filename
-    let (export_filename, set_export_filename) = signal("pixelforge".to_string());
+    let (export_filename, set_export_filename) = signal("pxlot".to_string());
 
     // New canvas dialog
     let (show_new_dialog, set_show_new_dialog) = signal(false);
@@ -189,7 +193,7 @@ fn App() -> impl IntoView {
         sync_state();
         // Auto-save
         editor.with_value(|state| {
-            storage::autosave(&state.canvas);
+            storage::autosave(&state.canvas, &state.history);
         });
     };
 
@@ -343,7 +347,7 @@ fn App() -> impl IntoView {
                 editor.update_value(|state| {
                     state.canvas = canvas;
                     state.timeline = data.timeline;
-                    state.history = pixelforge_core::history::History::new();
+                    state.history = pxlot_core::history::History::new();
                 });
                 trigger_render();
                 log::info!("Project loaded from IndexedDB");
@@ -388,9 +392,9 @@ fn App() -> impl IntoView {
                         png_format::MAX_IMPORT_DIMENSION
                     );
                     editor.update_value(|state| {
-                        state.timeline = pixelforge_animation::Timeline::new(canvas.clone());
+                        state.timeline = pxlot_animation::Timeline::new(canvas.clone());
                         state.canvas = canvas;
-                        state.history = pixelforge_core::history::History::new();
+                        state.history = pxlot_core::history::History::new();
                         state.needs_center = true;
                     });
                     trigger_render();
@@ -483,7 +487,7 @@ fn App() -> impl IntoView {
             // Lay out frames horizontally
             let sheet_w = fw * frame_count as u32;
             let sheet_h = fh;
-            let mut sheet_canvas = pixelforge_core::Canvas::new(sheet_w, sheet_h);
+            let mut sheet_canvas = pxlot_core::Canvas::new(sheet_w, sheet_h);
             let sfx = sheet_canvas.frame_x;
             let sfy = sheet_canvas.frame_y;
             for (i, frame) in state.timeline.frames.iter().enumerate() {
@@ -623,9 +627,9 @@ fn App() -> impl IntoView {
             let flat = state.canvas.flatten_frame();
             let (result, _palette) = image_processing::pixelize(&flat, &params);
             let new_canvas = image_processing::buffer_to_canvas(result);
-            state.timeline = pixelforge_animation::Timeline::new(new_canvas.clone());
+            state.timeline = pxlot_animation::Timeline::new(new_canvas.clone());
             state.canvas = new_canvas;
-            state.history = pixelforge_core::history::History::new();
+            state.history = pxlot_core::history::History::new();
         });
         set_ai_result.set(AiResult {
             palette_hex: vec![],
@@ -756,14 +760,14 @@ fn App() -> impl IntoView {
                     if let Some(clip) = clip {
                         let default_paste = (state.canvas.frame_x as i32, state.canvas.frame_y as i32);
                         let (ox, oy) = state.selection.map(|(x, y, _, _)| (x, y)).unwrap_or(default_paste);
-                        let mut cmd = pixelforge_core::history::Command::new("Paste");
+                        let mut cmd = pxlot_core::history::Command::new("Paste");
                         for cy in 0..clip.height {
                             for cx in 0..clip.width {
                                 let px = ox + cx as i32;
                                 let py = oy + cy as i32;
                                 if px >= 0 && py >= 0 && (px as u32) < state.canvas.width && (py as u32) < state.canvas.height {
                                     let color = clip.pixels[(cy * clip.width + cx) as usize];
-                                    pixelforge_tools::pencil_pixel(&mut state.canvas, px as u32, py as u32, color, &mut cmd);
+                                    pxlot_tools::pencil_pixel(&mut state.canvas, px as u32, py as u32, color, &mut cmd);
                                 }
                             }
                         }
@@ -778,14 +782,14 @@ fn App() -> impl IntoView {
                 editor.update_value(|state| {
                     if let Some((sx, sy, sw, sh)) = state.selection {
                         let mut pixels = Vec::new();
-                        let mut cmd = pixelforge_core::history::Command::new("Cut");
+                        let mut cmd = pxlot_core::history::Command::new("Cut");
                         if let Some(_) = state.canvas.active_layer_ref() {
                             for y in sy..(sy + sh) {
                                 for x in sx..(sx + sw) {
                                     if x >= 0 && y >= 0 && (x as u32) < state.canvas.width && (y as u32) < state.canvas.height {
                                         let layer = &state.canvas.layers[state.canvas.active_layer];
                                         pixels.push(*layer.buffer.get_pixel(x as u32, y as u32).unwrap_or(&Color::TRANSPARENT));
-                                        pixelforge_tools::pencil_pixel(&mut state.canvas, x as u32, y as u32, Color::TRANSPARENT, &mut cmd);
+                                        pxlot_tools::pencil_pixel(&mut state.canvas, x as u32, y as u32, Color::TRANSPARENT, &mut cmd);
                                     } else {
                                         pixels.push(Color::TRANSPARENT);
                                     }
@@ -854,7 +858,7 @@ fn App() -> impl IntoView {
                         prop:value=move || export_filename.get()
                         on:input=move |ev| set_export_filename.set(event_target_value(&ev))
                         title="Export filename (without extension)"
-                        placeholder="pixelforge"
+                        placeholder="pxlot"
                         style="width: 80px;"
                     />
                     <select
@@ -1035,10 +1039,10 @@ fn App() -> impl IntoView {
                                         let w: u32 = new_canvas_width.get().parse().unwrap_or(32).clamp(1, 256);
                                         let h: u32 = new_canvas_height.get().parse().unwrap_or(32).clamp(1, 256);
                                         editor.update_value(|state| {
-                                            let canvas = pixelforge_core::Canvas::new(w, h);
-                                            state.timeline = pixelforge_animation::Timeline::new(canvas.clone());
+                                            let canvas = pxlot_core::Canvas::new(w, h);
+                                            state.timeline = pxlot_animation::Timeline::new(canvas.clone());
                                             state.canvas = canvas;
-                                            state.history = pixelforge_core::history::History::new();
+                                            state.history = pxlot_core::history::History::new();
                                             state.selection = None;
                                             state.needs_center = true;
                                         });
@@ -1083,13 +1087,13 @@ fn App() -> impl IntoView {
                                             let old_fh = old.frame_height();
                                             let old_fx = old.frame_x;
                                             let old_fy = old.frame_y;
-                                            let mut new_canvas = pixelforge_core::Canvas::new(nw, nh);
+                                            let mut new_canvas = pxlot_core::Canvas::new(nw, nh);
                                             let new_fx = new_canvas.frame_x;
                                             let new_fy = new_canvas.frame_y;
                                             // Copy layers
                                             new_canvas.layers.clear();
                                             for layer in &old.layers {
-                                                let mut new_layer = pixelforge_core::Layer::new(layer.name.clone(), new_canvas.width, new_canvas.height);
+                                                let mut new_layer = pxlot_core::Layer::new(layer.name.clone(), new_canvas.width, new_canvas.height);
                                                 new_layer.visible = layer.visible;
                                                 new_layer.locked = layer.locked;
                                                 new_layer.opacity = layer.opacity;
@@ -1107,8 +1111,8 @@ fn App() -> impl IntoView {
                                             }
                                             new_canvas.active_layer = old.active_layer.min(new_canvas.layers.len().saturating_sub(1));
                                             state.canvas = new_canvas.clone();
-                                            state.timeline = pixelforge_animation::Timeline::new(new_canvas);
-                                            state.history = pixelforge_core::history::History::new();
+                                            state.timeline = pxlot_animation::Timeline::new(new_canvas);
+                                            state.history = pxlot_core::history::History::new();
                                             state.selection = None;
                                             state.needs_center = true;
                                         });

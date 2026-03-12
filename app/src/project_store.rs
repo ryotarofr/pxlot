@@ -1,9 +1,9 @@
-use pixelforge_animation::Timeline;
+use pxlot_animation::Timeline;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
-const DB_NAME: &str = "pixelforge_projects";
+const DB_NAME: &str = "pxlot_projects";
 const DB_VERSION: u32 = 1;
 const STORE_NAME: &str = "projects";
 /// Max per-project size in bytes (50 MB).

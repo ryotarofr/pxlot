@@ -1,5 +1,5 @@
 [package]
-name = "pixelforge-core"
+name = "pxlot-core"
 version.workspace = true
 edition.workspace = true
 

@@ -1,7 +1,8 @@
+use serde::{Serialize, Deserialize};
 use crate::Color;
 
 /// A single pixel change for diff-based undo.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PixelChange {
     pub layer_index: usize,
     pub x: u32,
@@ -11,7 +12,7 @@ pub struct PixelChange {
 }
 
 /// A command representing a group of pixel changes (one user action).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Command {
     pub name: String,
     pub changes: Vec<PixelChange>,
@@ -51,6 +52,7 @@ const MAX_MEMORY: usize = 128 * 1024 * 1024; // 128 MB
 const MAX_COMMANDS: usize = 500;
 
 /// Undo/Redo history manager.
+#[derive(Serialize, Deserialize)]
 pub struct History {
     undo_stack: Vec<Command>,
     redo_stack: Vec<Command>,

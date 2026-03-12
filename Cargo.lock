@@ -1042,82 +1042,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
 
 [[package]]
-name = "pixelforge-animation"
-version = "0.1.0"
-dependencies = [
- "pixelforge-core",
- "serde",
-]
-
-[[package]]
-name = "pixelforge-app"
-version = "0.1.0"
-dependencies = [
- "console_error_panic_hook",
- "console_log",
- "js-sys",
- "leptos",
- "log",
- "pixelforge-animation",
- "pixelforge-core",
- "pixelforge-formats",
- "pixelforge-renderer",
- "pixelforge-tools",
- "pixelforge-wasm-bridge",
- "serde",
- "serde_json",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
-]
-
-[[package]]
-name = "pixelforge-core"
-version = "0.1.0"
-dependencies = [
- "serde",
-]
-
-[[package]]
-name = "pixelforge-formats"
-version = "0.1.0"
-dependencies = [
- "gif",
- "pixelforge-animation",
- "pixelforge-core",
- "png",
-]
-
-[[package]]
-name = "pixelforge-renderer"
-version = "0.1.0"
-dependencies = [
- "js-sys",
- "log",
- "pixelforge-core",
- "wasm-bindgen",
- "web-sys",
-]
-
-[[package]]
-name = "pixelforge-tools"
-version = "0.1.0"
-dependencies = [
- "pixelforge-core",
-]
-
-[[package]]
-name = "pixelforge-wasm-bridge"
-version = "0.1.0"
-dependencies = [
- "log",
- "pixelforge-core",
- "pixelforge-renderer",
- "pixelforge-tools",
- "wasm-bindgen",
-]
-
-[[package]]
 name = "png"
 version = "0.17.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1202,6 +1126,82 @@ dependencies = [
  "syn",
  "version_check",
  "yansi",
+]
+
+[[package]]
+name = "pxlot-animation"
+version = "0.1.0"
+dependencies = [
+ "pxlot-core",
+ "serde",
+]
+
+[[package]]
+name = "pxlot-app"
+version = "0.1.0"
+dependencies = [
+ "console_error_panic_hook",
+ "console_log",
+ "js-sys",
+ "leptos",
+ "log",
+ "pxlot-animation",
+ "pxlot-core",
+ "pxlot-formats",
+ "pxlot-renderer",
+ "pxlot-tools",
+ "pxlot-wasm-bridge",
+ "serde",
+ "serde_json",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+]
+
+[[package]]
+name = "pxlot-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "pxlot-formats"
+version = "0.1.0"
+dependencies = [
+ "gif",
+ "png",
+ "pxlot-animation",
+ "pxlot-core",
+]
+
+[[package]]
+name = "pxlot-renderer"
+version = "0.1.0"
+dependencies = [
+ "js-sys",
+ "log",
+ "pxlot-core",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
+name = "pxlot-tools"
+version = "0.1.0"
+dependencies = [
+ "pxlot-core",
+]
+
+[[package]]
+name = "pxlot-wasm-bridge"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "pxlot-core",
+ "pxlot-renderer",
+ "pxlot-tools",
+ "wasm-bindgen",
 ]
 
 [[package]]

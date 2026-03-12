@@ -1,5 +1,5 @@
 use leptos::prelude::*;
-use pixelforge_core::Color;
+use pxlot_core::Color;
 
 /// Default palette colors.
 const DEFAULT_PALETTE: &[&str] = &[

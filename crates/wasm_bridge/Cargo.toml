@@ -1,11 +1,11 @@
 [package]
-name = "pixelforge-wasm-bridge"
+name = "pxlot-wasm-bridge"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
-pixelforge-core = { workspace = true }
-pixelforge-tools = { workspace = true }
-pixelforge-renderer = { workspace = true }
+pxlot-core = { workspace = true }
+pxlot-tools = { workspace = true }
+pxlot-renderer = { workspace = true }
 wasm-bindgen = { workspace = true }
 log = { workspace = true }

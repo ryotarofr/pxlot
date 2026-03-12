@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pixelforge-v1';
+const CACHE_NAME = 'pxlot-v1';
 const ASSETS = [
   '/',
   '/index.html',

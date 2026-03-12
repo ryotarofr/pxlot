@@ -1,7 +1,7 @@
-use pixelforge_animation::Timeline;
-use pixelforge_core::history::History;
-use pixelforge_core::{Canvas, Color};
-use pixelforge_tools::ToolKind;
+use pxlot_animation::Timeline;
+use pxlot_core::history::History;
+use pxlot_core::{Canvas, Color};
+use pxlot_tools::ToolKind;
 
 /// Application-wide editor state.
 pub struct EditorState {

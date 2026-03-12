@@ -1,6 +1,6 @@
 {
-  "name": "PixelForge - Pixel Art Editor",
-  "short_name": "PixelForge",
+  "name": "pxlot - Pixel Art Editor",
+  "short_name": "pxlot",
   "description": "Browser-based pixel art editor with AI features",
   "start_url": "/",
   "display": "standalone",

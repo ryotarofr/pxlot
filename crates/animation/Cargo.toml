@@ -1,8 +1,8 @@
 [package]
-name = "pixelforge-animation"
+name = "pxlot-animation"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
-pixelforge-core = { workspace = true }
+pxlot-core = { workspace = true }
 serde = { version = "1", features = ["derive"] }

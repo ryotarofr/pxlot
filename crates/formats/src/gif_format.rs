@@ -1,4 +1,4 @@
-use pixelforge_animation::Timeline;
+use pxlot_animation::Timeline;
 
 /// Export a timeline as an animated GIF.
 /// Returns the GIF bytes.
@@ -113,7 +113,7 @@ fn find_nearest(palette: &[[u8; 3]], target: &[u8; 3]) -> usize {
 }
 
 /// Export a single canvas (non-animated) as a GIF.
-pub fn export_single_gif(canvas: &pixelforge_core::Canvas) -> Result<Vec<u8>, String> {
+pub fn export_single_gif(canvas: &pxlot_core::Canvas) -> Result<Vec<u8>, String> {
     let mut timeline = Timeline::new(canvas.clone());
     timeline.frames[0].delay_ms = 0;
     export_gif(&timeline)
@@ -122,7 +122,7 @@ pub fn export_single_gif(canvas: &pixelforge_core::Canvas) -> Result<Vec<u8>, St
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pixelforge_core::{Canvas, Color};
+    use pxlot_core::{Canvas, Color};
 
     #[test]
     fn test_export_gif_single_frame() {

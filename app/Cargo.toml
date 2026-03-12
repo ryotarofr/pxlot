@@ -1,15 +1,15 @@
 [package]
-name = "pixelforge-app"
+name = "pxlot-app"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
-pixelforge-core = { workspace = true }
-pixelforge-tools = { workspace = true }
-pixelforge-formats = { workspace = true }
-pixelforge-animation = { workspace = true }
-pixelforge-renderer = { workspace = true }
-pixelforge-wasm-bridge = { workspace = true }
+pxlot-core = { workspace = true }
+pxlot-tools = { workspace = true }
+pxlot-formats = { workspace = true }
+pxlot-animation = { workspace = true }
+pxlot-renderer = { workspace = true }
+pxlot-wasm-bridge = { workspace = true }
 leptos = { workspace = true }
 wasm-bindgen = { workspace = true }
 wasm-bindgen-futures = "0.4"

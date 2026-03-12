@@ -1,5 +1,5 @@
 use leptos::prelude::*;
-use pixelforge_core::image_processing::DitherMethod;
+use pxlot_core::image_processing::DitherMethod;
 
 /// AI analysis mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

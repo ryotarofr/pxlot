@@ -19,8 +19,8 @@ impl Lang {
 pub fn t(lang: Lang, key: &str) -> &'static str {
     match (lang, key) {
         // App title
-        (Lang::En, "app_title") => "PixelForge",
-        (Lang::Ja, "app_title") => "PixelForge",
+        (Lang::En, "app_title") => "Pxlot",
+        (Lang::Ja, "app_title") => "Pxlot",
 
         // Menu
         (Lang::En, "export_png") => "PNG",
@@ -79,8 +79,12 @@ pub fn t(lang: Lang, key: &str) -> &'static str {
         (Lang::Ja, "ai_execute") => "実行",
         (Lang::En, "ai_processing") => "Processing...",
         (Lang::Ja, "ai_processing") => "処理中...",
-        (Lang::En, "ai_offline") => "Offline - AI features unavailable. Local processing still works.",
-        (Lang::Ja, "ai_offline") => "オフライン - AI機能は使用できません。ローカル処理は利用可能です。",
+        (Lang::En, "ai_offline") => {
+            "Offline - AI features unavailable. Local processing still works."
+        }
+        (Lang::Ja, "ai_offline") => {
+            "オフライン - AI機能は使用できません。ローカル処理は利用可能です。"
+        }
         (Lang::En, "ai_apply_palette") => "Apply Palette",
         (Lang::Ja, "ai_apply_palette") => "パレットを適用",
         (Lang::En, "ai_size") => "Size:",
@@ -113,7 +117,7 @@ pub fn t(lang: Lang, key: &str) -> &'static str {
         (Lang::Ja, "frame") => "フレーム",
 
         // Fallback
-        _ => "?"
+        _ => "?",
     }
 }
 
@@ -126,12 +130,5 @@ pub fn provide_i18n() -> (ReadSignal<Lang>, WriteSignal<Lang>) {
 }
 
 fn detect_lang() -> Lang {
-    let nav_lang = web_sys::window()
-        .and_then(|w| w.navigator().language())
-        .unwrap_or_default();
-    if nav_lang.starts_with("ja") {
-        Lang::Ja
-    } else {
-        Lang::En
-    }
+    Lang::En
 }
