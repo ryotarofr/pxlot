@@ -175,9 +175,6 @@ pub async fn run_agent(
                         tool_finished = result.finished;
                     });
 
-                    // Signal canvas needs re-render + sync UI
-                    set_render_trigger.update(|v| *v += 1);
-
                     // Update tool status in chat
                     let name_clone = name.clone();
                     let output_clone = tool_output.clone();
@@ -216,6 +213,11 @@ pub async fn run_agent(
                     assistant_content.push(block.clone());
                 }
             }
+        }
+
+        // Batch re-render: trigger once after all tools in this turn
+        if !tool_results.is_empty() {
+            set_render_trigger.update(|v| *v += 1);
         }
 
         // Append assistant response to conversation history
