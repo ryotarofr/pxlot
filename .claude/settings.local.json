@@ -28,7 +28,9 @@
       "Bash(cargo test)",
       "Bash(cargo check --target wasm32-unknown-unknown -p pxlot-app)",
       "Bash(kill 1394)",
-      "Bash(cargo test:*)"
+      "Bash(cargo test:*)",
+      "Bash(xargs wc:*)",
+      "Bash(wc -l /c/Users/ryory/work/rust/pxlot/crates/formats/src/*.rs)"
     ]
   }
 }

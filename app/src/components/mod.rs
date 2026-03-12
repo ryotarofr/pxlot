@@ -1,3 +1,4 @@
+pub mod ai_chat;
 pub mod ai_panel;
 pub mod canvas_view;
 pub mod color_picker;

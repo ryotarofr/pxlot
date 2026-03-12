@@ -2,12 +2,14 @@ use leptos::prelude::*;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
+mod ai;
 mod components;
 mod i18n;
 mod project_store;
 mod state;
 mod storage;
 
+use components::ai_chat::AiChat;
 use components::ai_panel::{AiPanel, AiResult, AiStatus};
 use components::canvas_view::CanvasView;
 use components::color_picker::ColorPicker;
@@ -112,6 +114,52 @@ fn App() -> impl IntoView {
         status: AiStatus::Idle,
     });
     let (is_online, _set_is_online) = signal(true);
+
+    // AI Chat signals
+    let (chat_messages, set_chat_messages) = signal(Vec::<ai::ChatMessage>::new());
+    let (ai_running, set_ai_running) = signal(false);
+    let (ai_has_key, set_ai_has_key) = signal(ai::load_api_key().is_some());
+    let (ai_model, set_ai_model) = signal("claude-sonnet-4-6".to_string());
+    let (ai_token_usage, set_ai_token_usage) = signal((0usize, 0usize));
+    let (chat_open, set_chat_open) = signal(false);
+
+    // AI Chat callbacks
+    let on_chat_send = Callback::new(move |text: String| {
+        // Add user message
+        set_chat_messages.update(|msgs| {
+            msgs.push(ai::ChatMessage::user(&text));
+        });
+        // TODO: trigger agent loop (Phase 2)
+        set_chat_messages.update(|msgs| {
+            msgs.push(ai::ChatMessage::status("Agent not yet connected. API integration coming soon."));
+        });
+    });
+
+    let on_chat_stop = Callback::new(move |_: ()| {
+        set_ai_running.set(false);
+    });
+
+    let on_chat_clear = Callback::new(move |_: ()| {
+        set_chat_messages.set(Vec::new());
+        set_ai_token_usage.set((0, 0));
+    });
+
+    let on_chat_save_key = Callback::new(move |key: String| {
+        ai::save_api_key(&key);
+        set_ai_has_key.set(true);
+    });
+
+    let on_chat_model_change = Callback::new(move |model: String| {
+        set_ai_model.set(model);
+    });
+
+    let on_toggle_chat = Callback::new(move |_: ()| {
+        set_chat_open.update(|v| *v = !*v);
+    });
+
+    let on_close_chat = Callback::new(move |_: ()| {
+        set_chat_open.set(false);
+    });
 
     // Zoom display
     let (zoom_display, set_zoom_display) = signal("16x".to_string());
@@ -961,7 +1009,26 @@ fn App() -> impl IntoView {
                 </div>
             </header>
             <main class="workspace">
-                <ToolPanel current_tool=current_tool set_tool=set_current_tool />
+                <ToolPanel
+                    current_tool=current_tool
+                    set_tool=set_current_tool
+                    chat_open=chat_open
+                    on_toggle_chat=on_toggle_chat
+                />
+                <AiChat
+                    messages=chat_messages
+                    is_running=ai_running
+                    has_api_key=ai_has_key
+                    is_open=chat_open
+                    on_close=on_close_chat
+                    on_send=on_chat_send
+                    on_stop=on_chat_stop
+                    on_clear=on_chat_clear
+                    on_save_api_key=on_chat_save_key
+                    on_model_change=on_chat_model_change
+                    model=ai_model
+                    token_usage=ai_token_usage
+                />
                 <div class="canvas-area">
                     <CanvasView editor=editor render_trigger=render_trigger set_color=set_current_color />
                 </div>

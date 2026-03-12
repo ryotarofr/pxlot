@@ -5,6 +5,10 @@ use pxlot_tools::ToolKind;
 pub fn ToolPanel(
     current_tool: ReadSignal<ToolKind>,
     set_tool: WriteSignal<ToolKind>,
+    /// Whether the AI chat panel is open.
+    chat_open: ReadSignal<bool>,
+    /// Toggle the AI chat panel.
+    on_toggle_chat: Callback<()>,
 ) -> impl IntoView {
     let drawing_tools = vec![
         (ToolKind::Pencil, "P", "Pencil (B)"),
@@ -57,6 +61,15 @@ pub fn ToolPanel(
                 <div class="tool-separator"></div>
                 {shape_btns}
             </div>
+            <div class="tool-panel-spacer"></div>
+            <button
+                class="tool-btn tool-chat-btn"
+                class:active=move || chat_open.get()
+                title="AI Chat"
+                on:click=move |_| on_toggle_chat.run(())
+            >
+                "AI"
+            </button>
         </aside>
     }
 }
