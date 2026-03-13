@@ -1,65 +1,60 @@
-/// Agent loop: orchestrates the conversation between user, LLM, and canvas tools.
+/// Plan→Execute agent: asks the LLM for a JSON drawing plan, then executes it locally.
+///
+/// The model draws in a normalized 64x64 coordinate space (0–63).
+/// Coordinates are offset to the canvas centre before execution.
 use leptos::prelude::*;
 use pxlot_core::history::Command;
-use pxlot_formats::png_format;
+use serde::Deserialize;
+use serde_json::{json, Value};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use crate::ai::api_client::{self, ApiMessage, ContentBlock, ImageSource, MessagesRequest};
+use crate::ai::api_client::{self, ApiMessage, ContentBlock, MessagesRequest};
 use crate::ai::tools;
 use crate::ai::ChatMessage;
 use crate::state::EditorState;
 
-/// How often to send a canvas screenshot to the LLM (every N turns).
-const SEND_IMAGE_EVERY: usize = 5;
+/// Maximum operations to execute from a single plan.
+const MAX_OPERATIONS: usize = 50;
 
-/// Maximum turns before forcefully stopping.
-const MAX_TURNS: usize = 20;
+/// The fixed drawing size the model works in.
+const DRAW_SIZE: u32 = 64;
 
-/// System prompt template.
-fn system_prompt(width: u32, height: u32) -> String {
-    let xmax = width.saturating_sub(1);
-    let ymax = height.saturating_sub(1);
+/// System prompt — model draws in a 64x64 coordinate space (0–63).
+/// Coordinates are transparently offset to the canvas centre by the executor.
+fn system_prompt() -> String {
+    let max = DRAW_SIZE - 1;
     format!(
-        r##"You are an expert pixel art drawing assistant. Canvas: {width}x{height} pixels.
+        r##"You are an expert pixel art assistant. You draw on a 64x64 pixel canvas.
+Coordinates: (0,0) top-left, x right, y down. Valid range: x[0,{max}], y[0,{max}].
 
-## Coordinate System
-- (0,0) is the top-left corner; x increases right, y increases down
-- Valid range: x in [0, {xmax}], y in [0, {ymax}]
-- Colors: hex strings like "#ff0000" (red), "#000000" (black), "#ffffff" (white)
+Respond with ONLY a valid JSON object. No markdown, no explanation.
 
-## Drawing Workflow — Follow This Order
-1. **Plan first**: Decide on a limited color palette (4–8 colors). Sketch the major shapes mentally.
-2. **Background**: Fill the background first using `flood_fill` at (0,0) or `draw_filled_rect` covering the full canvas.
-3. **Large shapes**: Draw the main body/silhouette with `draw_filled_rect` or `draw_filled_ellipse`.
-4. **Outlines**: Add outlines with `draw_rect`, `draw_ellipse`, or `draw_line` in a dark color.
-5. **Details**: Add fine details last with `set_pixels` only for small accents (eyes, highlights, etc.).
-6. **Finish**: Call `finish` when the drawing is complete.
+JSON format:
+{{"description":"...","palette":{{"bg":"#hex","main":"#hex","dark":"#hex","light":"#hex","outline":"#hex"}},"operations":[{{"tool":"name",...}}]}}
 
-## Pixel Art Quality Rules
-- **Limited palette**: Use 4–8 colors max. Avoid gradients or too many shades.
-- **Strong silhouette**: The shape should be recognizable from its outline alone.
-- **Prefer primitives**: Use `draw_filled_rect`, `draw_filled_ellipse`, and `flood_fill` for bodies and fills. Reserve `set_pixels` for tiny details only — never use it for fills or large areas.
-- **Dark outlines**: A 1-pixel dark outline makes shapes pop and look polished.
-- **Consistent scale**: Keep proportions correct for the canvas size.
-- **Work large-to-small**: Background → large shapes → medium details → small details.
+"palette": declare 4-8 named colors before drawing. Include: background, main color, shadow shade, highlight shade, and dark outline. Use these exact colors in operations.
 
-## Tool Guide
-- `flood_fill(x, y, color)` — Fill a large solid area. Use for backgrounds and enclosed shapes.
-- `draw_filled_rect(x0,y0,x1,y1,color)` — Best for rectangular bodies, backgrounds, large fills.
-- `draw_filled_ellipse(x0,y0,x1,y1,color)` — Circular/oval bodies (heads, wheels, planets).
-- `draw_rect(x0,y0,x1,y1,color)` — Outline of a rectangle.
-- `draw_ellipse(x0,y0,x1,y1,color)` — Outline of an ellipse.
-- `draw_line(x0,y0,x1,y1,color)` — Straight-line details (limbs, antennas, borders).
-- `set_pixels(pixels[])` — Individual pixels; use ONLY for small details (eyes, dots, highlights).
-- `clear_canvas()` — Wipe the layer. Use if you need to restart.
-- `finish(message)` — REQUIRED to end the session. Call exactly once when done.
+Tools:
+- draw_filled_rect: x0,y0,x1,y1,color — filled rectangle
+- draw_filled_ellipse: x0,y0,x1,y1,color — filled ellipse
+- draw_rect: x0,y0,x1,y1,color — rectangle outline
+- draw_ellipse: x0,y0,x1,y1,color — ellipse outline
+- draw_line: x0,y0,x1,y1,color — straight line
+- flood_fill: x,y,color — fill contiguous region
+- set_pixels: pixels:[{{"x":int,"y":int,"color":"hex"}}] — ONLY for tiny details
 
-## Important
-- Start drawing immediately without asking for confirmation.
-- Do NOT use `set_pixels` to fill large areas — it wastes tokens and looks bad.
-- Aim to complete the drawing in 8–12 tool calls.
-- Each shape tool call counts as one step — plan efficiently."##
+RULES:
+1. ALL coordinates must be in [0,{max}]. The canvas is exactly 64x64.
+2. Order: background fill → large body → shading → outlines → tiny details (set_pixels last).
+3. Use 2-3 shades for depth (base, shadow, highlight). Dark outlines (#1a1a2e) make shapes pop.
+4. set_pixels ONLY for accents (<10 pixels). Never for fills.
+5. Plan 10-25 operations. Never use clear_canvas.
+6. Combine overlapping shapes to create complex silhouettes (e.g. teardrop = large ellipse + small ellipse on top).
+7. For modifications: output only NEW operations to layer on top.
+
+EXAMPLE — a red mushroom on 64x64:
+{{"description":"Red mushroom with white spots","palette":{{"bg":"#87ceeb","cap":"#cc2222","cap_dark":"#991111","stem":"#f5e6c8","stem_dark":"#d4c4a0","spot":"#ffffff","outline":"#1a1a2e"}},"operations":[{{"tool":"draw_filled_rect","x0":0,"y0":0,"x1":63,"y1":63,"color":"#87ceeb"}},{{"tool":"draw_filled_ellipse","x0":8,"y0":8,"x1":56,"y1":38,"color":"#cc2222"}},{{"tool":"draw_filled_ellipse","x0":10,"y0":14,"x1":34,"y1":36,"color":"#991111"}},{{"tool":"draw_filled_rect","x0":22,"y0":34,"x1":42,"y1":58,"color":"#f5e6c8"}},{{"tool":"draw_filled_rect","x0":24,"y0":34,"x1":40,"y1":40,"color":"#d4c4a0"}},{{"tool":"draw_filled_ellipse","x0":18,"y0":14,"x1":28,"y1":24,"color":"#ffffff"}},{{"tool":"draw_filled_ellipse","x0":36,"y0":18,"x1":44,"y1":26,"color":"#ffffff"}},{{"tool":"draw_ellipse","x0":8,"y0":8,"x1":56,"y1":38,"color":"#1a1a2e"}},{{"tool":"draw_rect","x0":22,"y0":34,"x1":42,"y1":58,"color":"#1a1a2e"}},{{"tool":"draw_line","x0":22,"y0":34,"x1":8,"y1":34,"color":"#1a1a2e"}},{{"tool":"draw_line","x0":42,"y0":34,"x1":56,"y1":34,"color":"#1a1a2e"}},{{"tool":"set_pixels","pixels":[{{"x":28,"y":46,"color":"#1a1a2e"}},{{"x":36,"y":46,"color":"#1a1a2e"}}]}}]}}"##
     )
 }
 
@@ -71,15 +66,18 @@ pub fn new_stop_flag() -> StopFlag {
     Arc::new(AtomicBool::new(false))
 }
 
-/// Run the agent loop asynchronously.
-///
-/// This function is `spawn_local`'d from the UI callback.
-/// It communicates progress back to the UI via signal setters.
-///
-/// `conversation` holds the API message history (persisted across sends).
+/// Drawing plan parsed from LLM response.
+#[derive(Deserialize)]
+struct DrawingPlan {
+    #[serde(default)]
+    description: String,
+    #[serde(default)]
+    operations: Vec<Value>,
+}
+
+/// Run the agent: send a single API call to get a JSON drawing plan, then execute it.
 pub async fn run_agent(
     user_text: String,
-    api_key: String,
     model: String,
     editor: StoredValue<EditorState>,
     conversation: StoredValue<Vec<ApiMessage>>,
@@ -91,244 +89,255 @@ pub async fn run_agent(
 ) {
     set_running.set(true);
 
-    // Get canvas dimensions
-    let (width, height) = editor.with_value(|s| {
-        (s.canvas.frame_width(), s.canvas.frame_height())
+    // Compute offset to centre the 64x64 drawing area on the real canvas
+    let (offset_x, offset_y) = editor.with_value(|s| {
+        let w = s.canvas.frame_width();
+        let h = s.canvas.frame_height();
+        (
+            (w.saturating_sub(DRAW_SIZE) / 2) as i64,
+            (h.saturating_sub(DRAW_SIZE) / 2) as i64,
+        )
     });
 
-    let system = system_prompt(width, height);
-    let tool_defs = tools::tool_definitions();
+    let system = system_prompt();
 
-    // Add user message + canvas image to conversation
-    let mut user_content = vec![ContentBlock::Text {
-        text: user_text.clone(),
-    }];
-    if let Some(image_block) = capture_canvas_image(editor) {
-        user_content.push(image_block);
-    }
+    // Add user message — no canvas image (saves massive tokens)
     conversation.update_value(|msgs| {
         msgs.push(ApiMessage {
             role: "user".into(),
-            content: user_content,
+            content: vec![ContentBlock::Text {
+                text: user_text.clone(),
+            }],
         });
     });
 
-    let mut total_input = 0usize;
-    let mut total_output = 0usize;
+    // Single API call with no tool definitions — just ask for JSON plan
+    let api_messages = conversation.with_value(|msgs| msgs.clone());
+    let request = MessagesRequest {
+        model,
+        max_tokens: 4096,
+        system,
+        messages: api_messages,
+        tools: vec![],
+    };
 
-    for turn in 0..MAX_TURNS {
+    add_status(&set_messages, "Generating drawing plan...");
+
+    let response = match api_client::send_message(&request).await {
+        Ok(r) => r,
+        Err(e) => {
+            add_status(&set_messages, &format!("API error: {e}"));
+            set_running.set(false);
+            return;
+        }
+    };
+
+    // Update token usage
+    if let Some(usage) = &response.usage {
+        set_token_usage.set((usage.input_tokens, usage.output_tokens));
+    }
+
+    // Extract text from response
+    let response_text: String = response
+        .content
+        .iter()
+        .filter_map(|b| match b {
+            ContentBlock::Text { text } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+
+    // Save assistant response to conversation history
+    conversation.update_value(|msgs| {
+        msgs.push(ApiMessage {
+            role: "assistant".into(),
+            content: response.content.clone(),
+        });
+    });
+
+    // Parse drawing plan from JSON
+    let plan = match parse_plan(&response_text) {
+        Ok(p) => p,
+        Err(e) => {
+            add_status(&set_messages, &format!("Plan parse error: {e}"));
+            set_messages.update(|msgs| {
+                msgs.push(ChatMessage::assistant(&response_text));
+            });
+            set_running.set(false);
+            return;
+        }
+    };
+
+    // Show plan description
+    if !plan.description.is_empty() {
+        set_messages.update(|msgs| {
+            msgs.push(ChatMessage::assistant(&plan.description));
+        });
+    }
+
+    // Execute all operations locally with coordinate offset
+    let ops = &plan.operations[..plan.operations.len().min(MAX_OPERATIONS)];
+    let mut executed = 0u32;
+
+    for op in ops {
         if stop_flag.load(Ordering::Relaxed) {
             add_status(&set_messages, "Stopped by user.");
             break;
         }
 
-        // Build API request — strip old canvas images to save tokens
-        let api_messages = conversation.with_value(|msgs| strip_old_images(msgs));
-        let request = MessagesRequest {
-            model: model.clone(),
-            max_tokens: 4096,
-            system: system.clone(),
-            messages: api_messages,
-            tools: tool_defs.clone(),
+        let tool_name = match op.get("tool").and_then(|v| v.as_str()) {
+            Some(n) if n != "finish" && n != "clear_canvas" => n,
+            _ => continue,
         };
 
-        let response = match api_client::send_message(&api_key, &request).await {
-            Ok(r) => r,
-            Err(e) => {
-                add_status(&set_messages, &format!("API error: {e}"));
-                break;
-            }
-        };
+        // Offset coordinates from 64x64 space to real canvas
+        let offset_op = offset_coordinates(op, offset_x, offset_y);
 
-        // Update token usage
-        if let Some(usage) = &response.usage {
-            total_input += usage.input_tokens;
-            total_output += usage.output_tokens;
-            set_token_usage.set((total_input, total_output));
-        }
-
-        // Process response content blocks
-        let mut assistant_content: Vec<ContentBlock> = Vec::new();
-        let mut tool_results: Vec<ContentBlock> = Vec::new();
-        let mut finished = false;
-
-        for block in &response.content {
-            match block {
-                ContentBlock::Text { text } => {
-                    set_messages.update(|msgs| {
-                        msgs.push(ChatMessage::assistant(text));
-                    });
-                    assistant_content.push(block.clone());
-                }
-                ContentBlock::ToolUse { id, name, input } => {
-                    // Show tool running
-                    set_messages.update(|msgs| {
-                        msgs.push(ChatMessage::tool(
-                            name,
-                            crate::ai::ToolStatus::Running,
-                        ));
-                    });
-
-                    // Execute tool on canvas
-                    let mut tool_output = String::new();
-                    let mut tool_is_error = false;
-                    let mut tool_finished = false;
-
-                    editor.update_value(|state| {
-                        let mut cmd = Command::new(format!("ai:{name}"));
-                        let result = tools::execute_tool(name, input, &mut state.canvas, &mut cmd);
-                        if !cmd.is_empty() {
-                            state.history.push(cmd);
-                        }
-                        tool_output = result.output;
-                        tool_is_error = result.is_error;
-                        tool_finished = result.finished;
-                    });
-
-                    // Update tool status in chat
-                    let name_clone = name.clone();
-                    let output_clone = tool_output.clone();
-                    set_messages.update(|msgs| {
-                        if let Some(last) = msgs.last_mut() {
-                            last.content = if tool_is_error {
-                                crate::ai::ChatContent::ToolUse {
-                                    name: name_clone,
-                                    status: crate::ai::ToolStatus::Error(output_clone),
-                                }
-                            } else {
-                                crate::ai::ChatContent::ToolUse {
-                                    name: name_clone,
-                                    status: crate::ai::ToolStatus::Done,
-                                }
-                            };
-                        }
-                    });
-
-                    if tool_finished {
-                        finished = true;
-                        let output_msg = tool_output.clone();
-                        set_messages.update(|msgs| {
-                            msgs.push(ChatMessage::assistant(&output_msg));
-                        });
-                    }
-
-                    assistant_content.push(block.clone());
-                    tool_results.push(ContentBlock::ToolResult {
-                        tool_use_id: id.clone(),
-                        content: tool_output,
-                        is_error: if tool_is_error { Some(true) } else { None },
-                    });
-                }
-                _ => {
-                    assistant_content.push(block.clone());
-                }
-            }
-        }
-
-        // Batch re-render: trigger once after all tools in this turn
-        if !tool_results.is_empty() {
-            set_render_trigger.update(|v| *v += 1);
-        }
-
-        // Append assistant response to conversation history
-        conversation.update_value(|msgs| {
-            msgs.push(ApiMessage {
-                role: "assistant".into(),
-                content: assistant_content,
-            });
+        // Show tool in chat
+        set_messages.update(|msgs| {
+            msgs.push(ChatMessage::tool(
+                tool_name,
+                crate::ai::ToolStatus::Running,
+            ));
         });
 
-        if finished {
-            break;
-        }
+        // Execute on canvas
+        let mut is_error = false;
+        let mut output = String::new();
 
-        // Send tool results back
-        if !tool_results.is_empty() {
-            // Periodically attach canvas image for visual feedback
-            if (turn + 1) % SEND_IMAGE_EVERY == 0 {
-                if let Some(image_block) = capture_canvas_image(editor) {
-                    tool_results.push(image_block);
-                }
+        editor.update_value(|state| {
+            let mut cmd = Command::new(format!("ai:{tool_name}"));
+            let result =
+                tools::execute_tool(tool_name, &offset_op, &mut state.canvas, &mut cmd);
+            if !cmd.is_empty() {
+                state.history.push(cmd);
             }
+            is_error = result.is_error;
+            output = result.output;
+        });
 
-            conversation.update_value(|msgs| {
-                msgs.push(ApiMessage {
-                    role: "user".into(),
-                    content: tool_results,
-                });
-            });
-        } else {
-            // No tool calls — model sent only text.
-            if response.stop_reason.as_deref() == Some("end_turn") {
-                break;
+        // Update tool status
+        let name_s = tool_name.to_string();
+        let out_s = output;
+        set_messages.update(|msgs| {
+            if let Some(last) = msgs.last_mut() {
+                last.content = if is_error {
+                    crate::ai::ChatContent::ToolUse {
+                        name: name_s,
+                        status: crate::ai::ToolStatus::Error(out_s),
+                    }
+                } else {
+                    crate::ai::ChatContent::ToolUse {
+                        name: name_s,
+                        status: crate::ai::ToolStatus::Done,
+                    }
+                };
+            }
+        });
+
+        executed += 1;
+    }
+
+    // Single render after all operations
+    if executed > 0 {
+        set_render_trigger.update(|v| *v += 1);
+    }
+
+    add_status(
+        &set_messages,
+        &format!("Done — {executed} operations executed."),
+    );
+    set_running.set(false);
+}
+
+// ── Coordinate offset ─────────────────────────────────────────
+
+/// Clamp a coordinate to the [0, DRAW_SIZE-1] range, then add the canvas offset.
+fn clamp_and_offset(val: i64, offset: i64) -> i64 {
+    let max = (DRAW_SIZE - 1) as i64;
+    val.clamp(0, max) + offset
+}
+
+/// Clamp all coordinates to the 64x64 drawing space, then offset to the real canvas position.
+/// This guarantees the drawing stays within 64x64 regardless of what the model outputs.
+fn offset_coordinates(op: &Value, dx: i64, dy: i64) -> Value {
+    let mut out = op.clone();
+
+    let coord_keys_xy = [("x0", "y0"), ("x1", "y1")];
+    for (xk, yk) in &coord_keys_xy {
+        if let Some(x) = op.get(xk).and_then(|v| v.as_i64()) {
+            out[xk] = json!(clamp_and_offset(x, dx));
+        }
+        if let Some(y) = op.get(yk).and_then(|v| v.as_i64()) {
+            out[yk] = json!(clamp_and_offset(y, dy));
+        }
+    }
+
+    // Single-point tools (flood_fill)
+    if let Some(x) = op.get("x").and_then(|v| v.as_i64()) {
+        out["x"] = json!(clamp_and_offset(x, dx));
+    }
+    if let Some(y) = op.get("y").and_then(|v| v.as_i64()) {
+        out["y"] = json!(clamp_and_offset(y, dy));
+    }
+
+    // set_pixels — clamp and offset each pixel
+    if let Some(pixels) = op.get("pixels").and_then(|v| v.as_array()) {
+        let offset_pixels: Vec<Value> = pixels
+            .iter()
+            .map(|p| {
+                let mut pp = p.clone();
+                if let Some(x) = p.get("x").and_then(|v| v.as_i64()) {
+                    pp["x"] = json!(clamp_and_offset(x, dx));
+                }
+                if let Some(y) = p.get("y").and_then(|v| v.as_i64()) {
+                    pp["y"] = json!(clamp_and_offset(y, dy));
+                }
+                pp
+            })
+            .collect();
+        out["pixels"] = json!(offset_pixels);
+    }
+
+    out
+}
+
+// ── JSON parsing ──────────────────────────────────────────────
+
+/// Parse a drawing plan from LLM response text.
+fn parse_plan(text: &str) -> Result<DrawingPlan, String> {
+    let json_str = extract_json(text)?;
+    serde_json::from_str(json_str).map_err(|e| e.to_string())
+}
+
+/// Extract a JSON object from text, handling possible markdown wrapping.
+fn extract_json(text: &str) -> Result<&str, String> {
+    let t = text.trim();
+
+    // Direct JSON
+    if t.starts_with('{') {
+        return Ok(t);
+    }
+
+    // JSON in code fence
+    if let Some(fence) = t.find("```") {
+        let after = &t[fence + 3..];
+        let start = after.find('\n').map(|i| i + 1).unwrap_or(0);
+        if let Some(end) = after[start..].find("```") {
+            return Ok(after[start..start + end].trim());
+        }
+    }
+
+    // Outermost braces
+    if let Some(s) = t.find('{') {
+        if let Some(e) = t.rfind('}') {
+            if e > s {
+                return Ok(&t[s..=e]);
             }
         }
     }
 
-    set_running.set(false);
-}
-
-/// Remove canvas image blocks from all but the last message that contains one.
-///
-/// Canvas images are large base64 blobs. Keeping them in every turn of the
-/// conversation history causes input-token counts to explode. We only need
-/// the most recent image so the model can see the current state of the canvas.
-fn strip_old_images(msgs: &[ApiMessage]) -> Vec<ApiMessage> {
-    // Find the index of the last message that contains an image block.
-    let last_image_msg = msgs
-        .iter()
-        .rposition(|m| m.content.iter().any(|b| matches!(b, ContentBlock::Image { .. })));
-
-    let last = match last_image_msg {
-        Some(idx) => idx,
-        // No images in history at all — return a cheap clone.
-        None => return msgs.to_vec(),
-    };
-
-    msgs.iter()
-        .enumerate()
-        .filter_map(|(i, msg)| {
-            if i == last {
-                // Keep this message as-is (it holds the newest image).
-                return Some(msg.clone());
-            }
-            // For older messages: strip image blocks.
-            let has_image = msg.content.iter().any(|b| matches!(b, ContentBlock::Image { .. }));
-            if !has_image {
-                // No images to remove — cheap clone.
-                return Some(msg.clone());
-            }
-            let filtered: Vec<ContentBlock> = msg
-                .content
-                .iter()
-                .filter(|b| !matches!(b, ContentBlock::Image { .. }))
-                .cloned()
-                .collect();
-            // Drop the message entirely if stripping left it empty.
-            if filtered.is_empty() {
-                None
-            } else {
-                Some(ApiMessage {
-                    role: msg.role.clone(),
-                    content: filtered,
-                })
-            }
-        })
-        .collect()
-}
-
-/// Capture the current canvas as a base64 PNG image content block.
-fn capture_canvas_image(editor: StoredValue<EditorState>) -> Option<ContentBlock> {
-    let png_bytes = editor.with_value(|state| png_format::export_png(&state.canvas).ok())?;
-    use base64::Engine;
-    let b64 = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
-    Some(ContentBlock::Image {
-        source: ImageSource {
-            source_type: "base64".into(),
-            media_type: "image/png".into(),
-            data: b64,
-        },
-    })
+    Err("No JSON found in response".into())
 }
 
 /// Helper to add a status message to the chat.

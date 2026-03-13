@@ -137,14 +137,6 @@ fn App() -> impl IntoView {
             msgs.push(ai::ChatMessage::user(&text));
         });
 
-        // Get API key
-        let Some(api_key) = ai::load_api_key() else {
-            set_chat_messages.update(|msgs| {
-                msgs.push(ai::ChatMessage::status("No API key configured."));
-            });
-            return;
-        };
-
         let model = ai_model.get();
         let stop = stop_flag_for_send.clone();
         stop.store(false, std::sync::atomic::Ordering::Relaxed);
@@ -152,7 +144,6 @@ fn App() -> impl IntoView {
         // Spawn the async agent loop
         wasm_bindgen_futures::spawn_local(ai::agent::run_agent(
             text,
-            api_key,
             model,
             editor,
             ai_conversation,

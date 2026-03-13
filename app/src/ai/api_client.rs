@@ -12,6 +12,7 @@ pub struct MessagesRequest {
     pub max_tokens: usize,
     pub system: String,
     pub messages: Vec<ApiMessage>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub tools: Vec<ToolDefinition>,
 }
 
@@ -91,12 +92,10 @@ pub struct ApiErrorDetail {
 
 // ── Client ─────────────────────────────────────────────────────
 
-const API_URL: &str = "https://api.anthropic.com/v1/messages";
-const API_VERSION: &str = "2023-06-01";
+const API_URL: &str = "/api/messages";
 
-/// Send a Messages API request and return the parsed response.
+/// Send a Messages API request via the backend proxy and return the parsed response.
 pub async fn send_message(
-    api_key: &str,
     request: &MessagesRequest,
 ) -> Result<MessagesResponse, String> {
     let body = serde_json::to_string(request).map_err(|e| format!("Serialize error: {e}"))?;
@@ -108,20 +107,10 @@ pub async fn send_message(
     let body_js = wasm_bindgen::JsValue::from_str(&body);
     opts.set_body(&body_js);
 
-    // Build headers
+    // Build headers — API key is handled by the backend proxy
     let headers = web_sys::Headers::new().map_err(|e| format!("Headers error: {e:?}"))?;
     headers
         .set("Content-Type", "application/json")
-        .map_err(|e| format!("Header error: {e:?}"))?;
-    headers
-        .set("x-api-key", api_key)
-        .map_err(|e| format!("Header error: {e:?}"))?;
-    headers
-        .set("anthropic-version", API_VERSION)
-        .map_err(|e| format!("Header error: {e:?}"))?;
-    // Required header for direct browser access
-    headers
-        .set("anthropic-dangerous-direct-browser-access", "true")
         .map_err(|e| format!("Header error: {e:?}"))?;
     opts.set_headers(&headers);
 

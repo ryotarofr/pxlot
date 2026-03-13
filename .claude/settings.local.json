@@ -30,7 +30,14 @@
       "Bash(kill 1394)",
       "Bash(cargo test:*)",
       "Bash(xargs wc:*)",
-      "Bash(wc -l /c/Users/ryory/work/rust/pxlot/crates/formats/src/*.rs)"
+      "Bash(wc -l /c/Users/ryory/work/rust/pxlot/crates/formats/src/*.rs)",
+      "Bash(xargs grep:*)",
+      "Bash(find /c/Users/ryory/work/rust/pxlot -type f -name server* -o -name backend* -o -name proxy*)",
+      "Bash(cargo check:*)",
+      "WebFetch(domain:trap.jp)"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\ryory\\work\\rust\\pxlot\\server"
     ]
   }
 }

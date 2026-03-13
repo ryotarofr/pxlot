@@ -32,7 +32,6 @@ pub struct AgentState {
     pub is_running: bool,
     pub current_turn: usize,
     pub config: AgentConfig,
-    pub api_key: Option<String>,
     pub total_input_tokens: usize,
     pub total_output_tokens: usize,
 }
@@ -44,7 +43,6 @@ impl AgentState {
             is_running: false,
             current_turn: 0,
             config: AgentConfig::default(),
-            api_key: None,
             total_input_tokens: 0,
             total_output_tokens: 0,
         }
@@ -59,12 +57,3 @@ impl AgentState {
     }
 }
 
-/// Load API key from compile-time environment variable.
-///
-/// Set `ANTHROPIC_API_KEY` when building:
-///   ANTHROPIC_API_KEY=sk-ant-... trunk serve
-pub fn load_api_key() -> Option<String> {
-    option_env!("ANTHROPIC_API_KEY")
-        .filter(|k| !k.is_empty())
-        .map(|k| k.to_string())
-}
