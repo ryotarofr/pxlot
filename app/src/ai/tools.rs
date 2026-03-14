@@ -8,6 +8,7 @@ use super::api_client::ToolDefinition;
 
 // ── Tool definitions sent to the API ───────────────────────────
 
+#[allow(dead_code)]
 pub fn tool_definitions() -> Vec<ToolDefinition> {
     vec![
         ToolDefinition {
@@ -181,6 +182,7 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
 pub struct ToolExecResult {
     pub output: String,
     pub is_error: bool,
+    #[allow(dead_code)]
     pub finished: bool,
 }
 

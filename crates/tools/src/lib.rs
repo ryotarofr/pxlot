@@ -124,16 +124,16 @@ pub fn flood_fill(canvas: &mut Canvas, x: u32, y: u32, fill_color: Color, cmd: &
         cmd.add_change(layer_idx, px, py, current, fill_color);
         layer.buffer.set_pixel(px, py, fill_color);
 
-        if px > 0 {
+        if px > 0 && layer.buffer.get_pixel(px - 1, py).is_some_and(|c| *c == target_color) {
             queue.push_back((px - 1, py));
         }
-        if px + 1 < w {
+        if px + 1 < w && layer.buffer.get_pixel(px + 1, py).is_some_and(|c| *c == target_color) {
             queue.push_back((px + 1, py));
         }
-        if py > 0 {
+        if py > 0 && layer.buffer.get_pixel(px, py - 1).is_some_and(|c| *c == target_color) {
             queue.push_back((px, py - 1));
         }
-        if py + 1 < h {
+        if py + 1 < h && layer.buffer.get_pixel(px, py + 1).is_some_and(|c| *c == target_color) {
             queue.push_back((px, py + 1));
         }
     }

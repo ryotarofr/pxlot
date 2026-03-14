@@ -1,7 +1,8 @@
 /// Plan→Execute agent: asks the LLM for a JSON drawing plan, then executes it locally.
 ///
+/// Supports both single-frame and multi-frame (animation) plans.
 /// The model draws in a normalized 64x64 coordinate space (0–63).
-/// Coordinates are offset to the canvas centre before execution.
+/// Coordinates are clamped and offset to the canvas centre before execution.
 use leptos::prelude::*;
 use pxlot_core::history::Command;
 use serde::Deserialize;
@@ -14,14 +15,17 @@ use crate::ai::tools;
 use crate::ai::ChatMessage;
 use crate::state::EditorState;
 
-/// Maximum operations to execute from a single plan.
-const MAX_OPERATIONS: usize = 50;
+/// Maximum operations to execute per frame.
+const MAX_OPS_PER_FRAME: usize = 40;
+
+/// Maximum frames in an animation plan.
+const MAX_FRAMES: usize = 8;
 
 /// The fixed drawing size the model works in.
 const DRAW_SIZE: u32 = 64;
 
-/// System prompt — model draws in a 64x64 coordinate space (0–63).
-/// Coordinates are transparently offset to the canvas centre by the executor.
+// ── System prompt ────────────────────────────────────────────
+
 fn system_prompt() -> String {
     let max = DRAW_SIZE - 1;
     format!(
@@ -30,10 +34,15 @@ Coordinates: (0,0) top-left, x right, y down. Valid range: x[0,{max}], y[0,{max}
 
 Respond with ONLY a valid JSON object. No markdown, no explanation.
 
-JSON format:
+You support TWO formats:
+
+FORMAT 1 — Single image:
 {{"description":"...","palette":{{"bg":"#hex","main":"#hex","dark":"#hex","light":"#hex","outline":"#hex"}},"operations":[{{"tool":"name",...}}]}}
 
-"palette": declare 4-8 named colors before drawing. Include: background, main color, shadow shade, highlight shade, and dark outline. Use these exact colors in operations.
+FORMAT 2 — Animation (use when user asks for animation, movement, walking, idle, etc.):
+{{"description":"...","fps":8,"palette":{{...}},"frames":[{{"operations":[...]}},{{"operations":[...]}}]}}
+
+"palette": declare 4-8 named colors before drawing. Every color used in operations MUST come from this palette.
 
 Tools:
 - draw_filled_rect: x0,y0,x1,y1,color — filled rectangle
@@ -45,18 +54,27 @@ Tools:
 - set_pixels: pixels:[{{"x":int,"y":int,"color":"hex"}}] — ONLY for tiny details
 
 RULES:
-1. ALL coordinates must be in [0,{max}]. The canvas is exactly 64x64.
+1. ALL coordinates MUST be in [0,{max}]. The canvas is exactly 64x64.
 2. Order: background fill → large body → shading → outlines → tiny details (set_pixels last).
 3. Use 2-3 shades for depth (base, shadow, highlight). Dark outlines (#1a1a2e) make shapes pop.
 4. set_pixels ONLY for accents (<10 pixels). Never for fills.
-5. Plan 10-25 operations. Never use clear_canvas.
-6. Combine overlapping shapes to create complex silhouettes (e.g. teardrop = large ellipse + small ellipse on top).
+5. Plan 10-25 operations per frame. Never use clear_canvas.
+6. Combine overlapping shapes for complex silhouettes (e.g. teardrop = large ellipse + small ellipse on top).
 7. For modifications: output only NEW operations to layer on top.
 
-EXAMPLE — a red mushroom on 64x64:
+ANIMATION RULES (Format 2 only):
+- Each frame is a COMPLETE drawing (not a delta). Redraw everything per frame.
+- Keep character size, position, and palette consistent across frames.
+- Animate with small changes (1-3px shifts per frame) for smooth motion.
+- Frame count: idle=2-3, walk=4, attack=3-4, bounce=3-4.
+- All frames share the SAME palette.
+
+EXAMPLE — red mushroom (single image):
 {{"description":"Red mushroom with white spots","palette":{{"bg":"#87ceeb","cap":"#cc2222","cap_dark":"#991111","stem":"#f5e6c8","stem_dark":"#d4c4a0","spot":"#ffffff","outline":"#1a1a2e"}},"operations":[{{"tool":"draw_filled_rect","x0":0,"y0":0,"x1":63,"y1":63,"color":"#87ceeb"}},{{"tool":"draw_filled_ellipse","x0":8,"y0":8,"x1":56,"y1":38,"color":"#cc2222"}},{{"tool":"draw_filled_ellipse","x0":10,"y0":14,"x1":34,"y1":36,"color":"#991111"}},{{"tool":"draw_filled_rect","x0":22,"y0":34,"x1":42,"y1":58,"color":"#f5e6c8"}},{{"tool":"draw_filled_rect","x0":24,"y0":34,"x1":40,"y1":40,"color":"#d4c4a0"}},{{"tool":"draw_filled_ellipse","x0":18,"y0":14,"x1":28,"y1":24,"color":"#ffffff"}},{{"tool":"draw_filled_ellipse","x0":36,"y0":18,"x1":44,"y1":26,"color":"#ffffff"}},{{"tool":"draw_ellipse","x0":8,"y0":8,"x1":56,"y1":38,"color":"#1a1a2e"}},{{"tool":"draw_rect","x0":22,"y0":34,"x1":42,"y1":58,"color":"#1a1a2e"}},{{"tool":"draw_line","x0":22,"y0":34,"x1":8,"y1":34,"color":"#1a1a2e"}},{{"tool":"draw_line","x0":42,"y0":34,"x1":56,"y1":34,"color":"#1a1a2e"}},{{"tool":"set_pixels","pixels":[{{"x":28,"y":46,"color":"#1a1a2e"}},{{"x":36,"y":46,"color":"#1a1a2e"}}]}}]}}"##
     )
 }
+
+// ── Types ────────────────────────────────────────────────────
 
 /// Shared flag to signal the agent to stop.
 pub type StopFlag = Arc<AtomicBool>;
@@ -66,14 +84,51 @@ pub fn new_stop_flag() -> StopFlag {
     Arc::new(AtomicBool::new(false))
 }
 
-/// Drawing plan parsed from LLM response.
+/// Drawing plan parsed from LLM response — supports single-frame and animation.
 #[derive(Deserialize)]
 struct DrawingPlan {
     #[serde(default)]
     description: String,
+    /// Single-frame operations (Format 1)
+    #[serde(default)]
+    operations: Vec<Value>,
+    /// Animation frames (Format 2)
+    #[serde(default)]
+    frames: Vec<FramePlan>,
+    /// FPS for animation (default 8)
+    #[serde(default = "default_fps")]
+    fps: u32,
+}
+
+fn default_fps() -> u32 {
+    8
+}
+
+#[derive(Deserialize)]
+struct FramePlan {
     #[serde(default)]
     operations: Vec<Value>,
 }
+
+impl DrawingPlan {
+    /// Normalize plan into a list of frame operations.
+    /// Format 1 (operations) → 1 frame. Format 2 (frames) → multiple frames.
+    fn into_frames(self) -> (Vec<Vec<Value>>, u32) {
+        if !self.frames.is_empty() {
+            let frames: Vec<Vec<Value>> = self
+                .frames
+                .into_iter()
+                .take(MAX_FRAMES)
+                .map(|f| f.operations)
+                .collect();
+            (frames, self.fps.clamp(1, 30))
+        } else {
+            (vec![self.operations], 0) // fps=0 means single frame
+        }
+    }
+}
+
+// ── Agent entry point ────────────────────────────────────────
 
 /// Run the agent: send a single API call to get a JSON drawing plan, then execute it.
 pub async fn run_agent(
@@ -115,7 +170,7 @@ pub async fn run_agent(
     let api_messages = conversation.with_value(|msgs| msgs.clone());
     let request = MessagesRequest {
         model,
-        max_tokens: 4096,
+        max_tokens: 8192,
         system,
         messages: api_messages,
         tools: vec![],
@@ -147,7 +202,10 @@ pub async fn run_agent(
         })
         .collect();
 
-    // Save assistant response to conversation history
+    // Compress assistant response before saving to conversation history.
+    // Store only a short summary instead of the full JSON plan to save tokens
+    // on subsequent requests. The last plan is kept in full for follow-up accuracy.
+    compress_history(&conversation);
     conversation.update_value(|msgs| {
         msgs.push(ApiMessage {
             role: "assistant".into(),
@@ -175,13 +233,102 @@ pub async fn run_agent(
         });
     }
 
-    // Execute all operations locally with coordinate offset
-    let ops = &plan.operations[..plan.operations.len().min(MAX_OPERATIONS)];
+    let (frames, fps) = plan.into_frames();
+    let is_animation = frames.len() > 1;
+
+    if is_animation {
+        add_status(
+            &set_messages,
+            &format!("Animation: {} frames at {} FPS", frames.len(), fps),
+        );
+    }
+
+    // Execute each frame
+    let mut total_executed = 0u32;
+
+    for (frame_idx, frame_ops) in frames.iter().enumerate() {
+        if stop_flag.load(Ordering::Relaxed) {
+            add_status(&set_messages, "Stopped by user.");
+            break;
+        }
+
+        // For animation: add new frame (frame 0 uses the existing current frame)
+        if is_animation && frame_idx > 0 {
+            editor.update_value(|state| {
+                state.add_frame();
+            });
+        }
+
+        if is_animation {
+            add_status(
+                &set_messages,
+                &format!("Drawing frame {}/{}...", frame_idx + 1, frames.len()),
+            );
+        }
+
+        // Execute operations for this frame
+        let ops = &frame_ops[..frame_ops.len().min(MAX_OPS_PER_FRAME)];
+        let executed = execute_frame_ops(
+            ops,
+            offset_x,
+            offset_y,
+            &editor,
+            &set_messages,
+            &stop_flag,
+        );
+        total_executed += executed;
+
+        // Save frame to timeline
+        if is_animation {
+            editor.update_value(|state| {
+                state.save_frame();
+            });
+        }
+    }
+
+    // Set FPS for animations
+    if is_animation && fps > 0 {
+        editor.update_value(|state| {
+            state.timeline.fps = fps;
+            // Go back to first frame for preview
+            state.switch_frame(0);
+        });
+    }
+
+    // Single render trigger after all frames
+    if total_executed > 0 {
+        set_render_trigger.update(|v| *v += 1);
+    }
+
+    let summary = if is_animation {
+        format!(
+            "Done — {} frames, {} operations total.",
+            frames.len(),
+            total_executed
+        )
+    } else {
+        format!("Done — {total_executed} operations executed.")
+    };
+    add_status(&set_messages, &summary);
+    set_running.set(false);
+}
+
+// ── Frame execution ──────────────────────────────────────────
+
+/// Execute a list of operations on the current canvas frame.
+/// Returns the number of operations executed.
+fn execute_frame_ops(
+    ops: &[Value],
+    offset_x: i64,
+    offset_y: i64,
+    editor: &StoredValue<EditorState>,
+    set_messages: &WriteSignal<Vec<ChatMessage>>,
+    stop_flag: &StopFlag,
+) -> u32 {
     let mut executed = 0u32;
 
     for op in ops {
         if stop_flag.load(Ordering::Relaxed) {
-            add_status(&set_messages, "Stopped by user.");
             break;
         }
 
@@ -190,7 +337,7 @@ pub async fn run_agent(
             _ => continue,
         };
 
-        // Offset coordinates from 64x64 space to real canvas
+        // Clamp + offset coordinates from 64x64 space to real canvas
         let offset_op = offset_coordinates(op, offset_x, offset_y);
 
         // Show tool in chat
@@ -238,19 +385,66 @@ pub async fn run_agent(
         executed += 1;
     }
 
-    // Single render after all operations
-    if executed > 0 {
-        set_render_trigger.update(|v| *v += 1);
-    }
-
-    add_status(
-        &set_messages,
-        &format!("Done — {executed} operations executed."),
-    );
-    set_running.set(false);
+    executed
 }
 
-// ── Coordinate offset ─────────────────────────────────────────
+// ── Conversation history compression ─────────────────────────
+
+/// Compress older assistant responses in the conversation history.
+/// Keeps the most recent assistant response in full (for follow-up accuracy).
+/// Replaces all older assistant responses with a short text summary.
+fn compress_history(conversation: &StoredValue<Vec<ApiMessage>>) {
+    conversation.update_value(|msgs| {
+        // Find indices of all assistant messages
+        let assistant_indices: Vec<usize> = msgs
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| m.role == "assistant")
+            .map(|(i, _)| i)
+            .collect();
+
+        // Only compress if there are 2+ assistant messages (keep the latest intact)
+        if assistant_indices.len() < 2 {
+            return;
+        }
+
+        // Compress all but the last assistant message
+        let to_compress = &assistant_indices[..assistant_indices.len() - 1];
+        for &idx in to_compress {
+            // Extract a short summary from the existing content
+            let summary = extract_summary(&msgs[idx].content);
+            msgs[idx].content = vec![ContentBlock::Text { text: summary }];
+        }
+    });
+}
+
+/// Extract a short text summary from content blocks.
+fn extract_summary(content: &[ContentBlock]) -> String {
+    for block in content {
+        if let ContentBlock::Text { text } = block {
+            // Try to extract the "description" field from JSON
+            if let Ok(v) = serde_json::from_str::<Value>(text) {
+                if let Some(desc) = v.get("description").and_then(|d| d.as_str()) {
+                    let frame_count = v
+                        .get("frames")
+                        .and_then(|f| f.as_array())
+                        .map(|a| a.len())
+                        .unwrap_or(0);
+                    if frame_count > 0 {
+                        return format!("[Previous: {desc} ({frame_count} frames)]");
+                    }
+                    return format!("[Previous: {desc}]");
+                }
+            }
+            // Fallback: truncate raw text
+            let truncated: String = text.chars().take(80).collect();
+            return format!("[Previous response: {truncated}...]");
+        }
+    }
+    "[Previous drawing]".to_string()
+}
+
+// ── Coordinate offset ────────────────────────────────────────
 
 /// Clamp a coordinate to the [0, DRAW_SIZE-1] range, then add the canvas offset.
 fn clamp_and_offset(val: i64, offset: i64) -> i64 {
@@ -302,7 +496,7 @@ fn offset_coordinates(op: &Value, dx: i64, dy: i64) -> Value {
     out
 }
 
-// ── JSON parsing ──────────────────────────────────────────────
+// ── JSON parsing ─────────────────────────────────────────────
 
 /// Parse a drawing plan from LLM response text.
 fn parse_plan(text: &str) -> Result<DrawingPlan, String> {

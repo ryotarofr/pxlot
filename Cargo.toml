@@ -34,3 +34,9 @@ pxlot-formats = { path = "crates/formats" }
 pxlot-animation = { path = "crates/animation" }
 pxlot-renderer = { path = "crates/renderer" }
 pxlot-wasm-bridge = { path = "crates/wasm_bridge" }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true

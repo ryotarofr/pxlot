@@ -126,6 +126,27 @@ impl Layer {
     }
 }
 
+/// Alpha-composite a source pixel (with layer opacity) onto a destination RGBA slice.
+#[inline]
+fn blend_pixel(dst: &mut [u8], src: &Color, layer_opacity: f64) {
+    if src.a == 0 {
+        return;
+    }
+    let sa = (src.a as f64 / 255.0) * layer_opacity;
+    let dr = dst[0] as f64 / 255.0;
+    let dg = dst[1] as f64 / 255.0;
+    let db = dst[2] as f64 / 255.0;
+    let da = dst[3] as f64 / 255.0;
+    let (sr, sg, sb) = (src.r as f64 / 255.0, src.g as f64 / 255.0, src.b as f64 / 255.0);
+    let out_a = sa + da * (1.0 - sa);
+    if out_a > 0.0 {
+        dst[0] = ((sr * sa + dr * da * (1.0 - sa)) / out_a * 255.0 + 0.5) as u8;
+        dst[1] = ((sg * sa + dg * da * (1.0 - sa)) / out_a * 255.0 + 0.5) as u8;
+        dst[2] = ((sb * sa + db * da * (1.0 - sa)) / out_a * 255.0 + 0.5) as u8;
+        dst[3] = (out_a * 255.0 + 0.5) as u8;
+    }
+}
+
 /// Memory budget constant (256 MB).
 const MEMORY_BUDGET: usize = 256 * 1024 * 1024;
 
@@ -295,26 +316,7 @@ impl Canvas {
             let layer_opacity = layer.opacity as f64 / 255.0;
             for i in 0..size {
                 let src = &layer.buffer.pixels[i];
-                if src.a == 0 {
-                    continue;
-                }
-                let sa = (src.a as f64 / 255.0) * layer_opacity;
-                let di = i * 4;
-                let dr = result[di] as f64 / 255.0;
-                let dg = result[di + 1] as f64 / 255.0;
-                let db = result[di + 2] as f64 / 255.0;
-                let da = result[di + 3] as f64 / 255.0;
-
-                let (sr, sg, sb) = (src.r as f64 / 255.0, src.g as f64 / 255.0, src.b as f64 / 255.0);
-
-                // Normal blend
-                let out_a = sa + da * (1.0 - sa);
-                if out_a > 0.0 {
-                    result[di] = ((sr * sa + dr * da * (1.0 - sa)) / out_a * 255.0) as u8;
-                    result[di + 1] = ((sg * sa + dg * da * (1.0 - sa)) / out_a * 255.0) as u8;
-                    result[di + 2] = ((sb * sa + db * da * (1.0 - sa)) / out_a * 255.0) as u8;
-                    result[di + 3] = (out_a * 255.0) as u8;
-                }
+                blend_pixel(&mut result[i * 4..i * 4 + 4], src, layer_opacity);
             }
         }
         result
@@ -344,25 +346,8 @@ impl Canvas {
                     let bx = rx0 as usize + rx;
                     let buf_i = by * bw + bx;
                     let src = &layer.buffer.pixels[buf_i];
-                    if src.a == 0 {
-                        continue;
-                    }
-                    let sa = (src.a as f64 / 255.0) * layer_opacity;
                     let di = (ry * rw + rx) * 4;
-                    let dr = result[di] as f64 / 255.0;
-                    let dg = result[di + 1] as f64 / 255.0;
-                    let db = result[di + 2] as f64 / 255.0;
-                    let da = result[di + 3] as f64 / 255.0;
-
-                    let (sr, sg, sb) = (src.r as f64 / 255.0, src.g as f64 / 255.0, src.b as f64 / 255.0);
-
-                    let out_a = sa + da * (1.0 - sa);
-                    if out_a > 0.0 {
-                        result[di] = ((sr * sa + dr * da * (1.0 - sa)) / out_a * 255.0) as u8;
-                        result[di + 1] = ((sg * sa + dg * da * (1.0 - sa)) / out_a * 255.0) as u8;
-                        result[di + 2] = ((sb * sa + db * da * (1.0 - sa)) / out_a * 255.0) as u8;
-                        result[di + 3] = (out_a * 255.0) as u8;
-                    }
+                    blend_pixel(&mut result[di..di + 4], src, layer_opacity);
                 }
             }
         }
@@ -376,8 +361,14 @@ impl Canvas {
         let fx0 = self.frame_x;
         let fy0 = self.frame_y;
         let bw = self.width;
+        let bh = self.height;
         let size = (fw * fh) as usize;
         let mut result = vec![0u8; size * 4];
+
+        // Bounds check: ensure frame region fits within buffer
+        if fx0 + fw > bw || fy0 + fh > bh {
+            return result;
+        }
 
         for layer in &self.layers {
             if !layer.visible || layer.opacity == 0 {
@@ -390,25 +381,8 @@ impl Canvas {
                     let by = fy + fy0;
                     let buf_i = (by * bw + bx) as usize;
                     let src = &layer.buffer.pixels[buf_i];
-                    if src.a == 0 {
-                        continue;
-                    }
-                    let sa = (src.a as f64 / 255.0) * layer_opacity;
                     let di = (fy * fw + fx) as usize * 4;
-                    let dr = result[di] as f64 / 255.0;
-                    let dg = result[di + 1] as f64 / 255.0;
-                    let db = result[di + 2] as f64 / 255.0;
-                    let da = result[di + 3] as f64 / 255.0;
-
-                    let (sr, sg, sb) = (src.r as f64 / 255.0, src.g as f64 / 255.0, src.b as f64 / 255.0);
-
-                    let out_a = sa + da * (1.0 - sa);
-                    if out_a > 0.0 {
-                        result[di] = ((sr * sa + dr * da * (1.0 - sa)) / out_a * 255.0) as u8;
-                        result[di + 1] = ((sg * sa + dg * da * (1.0 - sa)) / out_a * 255.0) as u8;
-                        result[di + 2] = ((sb * sa + db * da * (1.0 - sa)) / out_a * 255.0) as u8;
-                        result[di + 3] = (out_a * 255.0) as u8;
-                    }
+                    blend_pixel(&mut result[di..di + 4], src, layer_opacity);
                 }
             }
         }

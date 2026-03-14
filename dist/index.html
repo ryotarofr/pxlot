@@ -3,30 +3,30 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#4a9eff" />
+    <meta name="theme-color" content="#00ff41" />
     <meta name="description" content="Browser-based pixel art editor with AI features" />
     <title>pxlot</title>
     <link rel="manifest" href="manifest.json" />
     <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
     <link rel="apple-touch-icon" href="icon-192.png" />
-    <link rel="stylesheet" href="/pxlot/main-5cd3931f52da3576.css" integrity="sha384-Wq+FOV8XbhRlOwyB3szzc47D1tANt0xJhOyVlDejscnMLQl+YqdTds5EaGLhvV7H"/>
+    <link rel="stylesheet" href="/pxlot/main-e19d24eca6666dee.css" integrity="sha384-bQ8SA3tXLVUa/GbAuK47z4pPbNNU+oxxMfDPXICDUX2FyzQhlpeR6WTX+Jft3aQi"/>
     
     
     
     
-<link rel="modulepreload" href="/pxlot/pxlot-app-b8473f1812791c5f.js" crossorigin="anonymous" integrity="sha384-0/YvoT/0SeYb/Z9MsR8f/CdL4l3eqeQ3/Ugg5cuubJoBLI1DX7oeR3rgkpnLMpoV"><link rel="preload" href="/pxlot/pxlot-app-b8473f1812791c5f_bg.wasm" crossorigin="anonymous" integrity="sha384-epLOb0D4uBZtSzTHZ3YoG0m8SU/1SnuK78H4tAygym0QzDD6ht51v4PxFVnlOZHk" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/pxlot/pxlot-app-4ed3c120b832f10f.js" crossorigin="anonymous" integrity="sha384-536ajdomkByvAzh/HsOvajHdjfcnqnV4wv5wy/bpXuYStXXMp3A5lfO/jU94jtuQ"><link rel="preload" href="/pxlot/pxlot-app-4ed3c120b832f10f_bg.wasm" crossorigin="anonymous" integrity="sha384-a8cuRYVj1PvPRsbfW4Kcsj/hD37Nq1U7zS1gR9UhgHX5g89k/QOaPct1rHwslTZU" as="fetch" type="application/wasm"></head>
 <body>
 <script>
 if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js').catch(() => {});
+        navigator.serviceWorker.register('/pxlot/sw.js').catch(() => {});
     });
 }
 </script>
 
 <script type="module">
-import init, * as bindings from '/pxlot/pxlot-app-b8473f1812791c5f.js';
-const wasm = await init({ module_or_path: '/pxlot/pxlot-app-b8473f1812791c5f_bg.wasm' });
+import init, * as bindings from '/pxlot/pxlot-app-4ed3c120b832f10f.js';
+const wasm = await init({ module_or_path: '/pxlot/pxlot-app-4ed3c120b832f10f_bg.wasm' });
 
 
 window.wasmBindings = bindings;

@@ -66,6 +66,7 @@ pub struct ToolDefinition {
 #[derive(Deserialize, Debug)]
 pub struct MessagesResponse {
     pub content: Vec<ContentBlock>,
+    #[allow(dead_code)]
     pub stop_reason: Option<String>,
     pub usage: Option<Usage>,
 }
@@ -81,6 +82,7 @@ pub struct Usage {
 #[derive(Deserialize, Debug)]
 pub struct ApiError {
     #[serde(rename = "type")]
+    #[allow(dead_code)]
     pub error_type: String,
     pub error: ApiErrorDetail,
 }

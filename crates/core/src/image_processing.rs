@@ -229,6 +229,9 @@ fn split_bucket(mut colors: Vec<[u8; 3]>) -> (Vec<[u8; 3]>, Vec<[u8; 3]>) {
 
 /// Reduce colors in a pixel buffer to the given palette.
 pub fn reduce_colors(buf: &mut PixelBuffer, palette: &[Color], dither: DitherMethod) {
+    if palette.is_empty() {
+        return;
+    }
     match dither {
         DitherMethod::None => reduce_no_dither(buf, palette),
         DitherMethod::FloydSteinberg => reduce_floyd_steinberg(buf, palette),
@@ -238,6 +241,9 @@ pub fn reduce_colors(buf: &mut PixelBuffer, palette: &[Color], dither: DitherMet
 }
 
 fn nearest_palette_color(color: Color, palette: &[Color]) -> Color {
+    if palette.is_empty() {
+        return color; // Return original color if no palette
+    }
     let mut best = palette[0];
     let mut best_dist = u32::MAX;
     for &pc in palette {

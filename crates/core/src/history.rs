@@ -1,4 +1,5 @@
 use serde::{Serialize, Deserialize};
+use std::collections::VecDeque;
 use crate::Color;
 
 /// A single pixel change for diff-based undo.
@@ -54,7 +55,7 @@ const MAX_COMMANDS: usize = 500;
 /// Undo/Redo history manager.
 #[derive(Serialize, Deserialize)]
 pub struct History {
-    undo_stack: Vec<Command>,
+    undo_stack: VecDeque<Command>,
     redo_stack: Vec<Command>,
     total_bytes: usize,
 }
@@ -62,7 +63,7 @@ pub struct History {
 impl History {
     pub fn new() -> Self {
         Self {
-            undo_stack: Vec::new(),
+            undo_stack: VecDeque::new(),
             redo_stack: Vec::new(),
             total_bytes: 0,
         }
@@ -80,22 +81,22 @@ impl History {
         }
 
         self.total_bytes += cmd.byte_size();
-        self.undo_stack.push(cmd);
+        self.undo_stack.push_back(cmd);
 
         // Evict oldest if over limits
         while (self.undo_stack.len() > MAX_COMMANDS || self.total_bytes > MAX_MEMORY)
             && self.undo_stack.len() > 1
         {
-            if let Some(evicted) = self.undo_stack.first() {
+            if let Some(evicted) = self.undo_stack.front() {
                 self.total_bytes = self.total_bytes.saturating_sub(evicted.byte_size());
             }
-            self.undo_stack.remove(0);
+            self.undo_stack.pop_front();
         }
     }
 
     /// Pop the most recent command for undo. Returns changes to revert.
     pub fn undo(&mut self) -> Option<&Command> {
-        let cmd = self.undo_stack.pop()?;
+        let cmd = self.undo_stack.pop_back()?;
         // Bytes stay the same (moved from undo to redo stack)
         self.redo_stack.push(cmd);
         self.redo_stack.last()
@@ -105,8 +106,8 @@ impl History {
     pub fn redo(&mut self) -> Option<&Command> {
         let cmd = self.redo_stack.pop()?;
         // Bytes stay the same (moved from redo to undo stack)
-        self.undo_stack.push(cmd);
-        self.undo_stack.last()
+        self.undo_stack.push_back(cmd);
+        self.undo_stack.back()
     }
 
     pub fn can_undo(&self) -> bool {

@@ -34,7 +34,9 @@
       "Bash(xargs grep:*)",
       "Bash(find /c/Users/ryory/work/rust/pxlot -type f -name server* -o -name backend* -o -name proxy*)",
       "Bash(cargo check:*)",
-      "WebFetch(domain:trap.jp)"
+      "WebFetch(domain:trap.jp)",
+      "Bash(find /c/Users/ryory/work/rust/pxlot/server -type f -name *.rs -o -name *.toml -o -name Dockerfile -o -name docker-compose.yml)",
+      "Bash(find /c/Users/ryory/work/rust/pxlot/server -type f -name *.rs)"
     ],
     "additionalDirectories": [
       "c:\\Users\\ryory\\work\\rust\\pxlot\\server"

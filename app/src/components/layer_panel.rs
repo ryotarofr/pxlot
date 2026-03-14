@@ -6,6 +6,7 @@ pub struct LayerInfo {
     pub index: usize,
     pub name: String,
     pub visible: bool,
+    #[allow(dead_code)]
     pub locked: bool,
     pub opacity: u8,
 }

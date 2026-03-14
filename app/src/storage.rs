@@ -48,46 +48,6 @@ pub fn autosave(canvas: &Canvas, history: &History) {
     }
 }
 
-/// Load canvas state from localStorage.
-pub fn load_autosave() -> Option<Canvas> {
-    let storage = get_storage()?;
-    let json = storage.get_item(STORAGE_KEY).ok()??;
-    match serde_json::from_str::<Canvas>(&json) {
-        Ok(canvas) => {
-            log::info!("Loaded autosave ({}x{})", canvas.frame_width(), canvas.frame_height());
-            Some(canvas)
-        }
-        Err(e) => {
-            log::warn!("Failed to parse autosave: {}", e);
-            None
-        }
-    }
-}
-
-/// Load history from localStorage.
-pub fn load_history() -> Option<History> {
-    let storage = get_storage()?;
-    let json = storage.get_item(HISTORY_KEY).ok()??;
-    match serde_json::from_str::<History>(&json) {
-        Ok(history) => {
-            log::info!("Loaded history (undo={}, redo={})", history.undo_count(), history.redo_count());
-            Some(history)
-        }
-        Err(e) => {
-            log::warn!("Failed to parse history: {}", e);
-            None
-        }
-    }
-}
-
-/// Clear the autosave data.
-pub fn clear_autosave() {
-    if let Some(storage) = get_storage() {
-        let _ = storage.remove_item(STORAGE_KEY);
-        let _ = storage.remove_item(HISTORY_KEY);
-    }
-}
-
 fn get_storage() -> Option<web_sys::Storage> {
     web_sys::window()?.local_storage().ok()?
 }
