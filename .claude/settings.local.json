@@ -39,7 +39,9 @@
       "Bash(find /c/Users/ryory/work/rust/pxlot/server -type f -name *.rs)",
       "Bash(grep -n \"ReadSignal\\\\|WriteSignal\" /c/Users/ryory/work/rust/pxlot/app/src/components/*.rs)",
       "Bash(find /c/Users/ryory/work/rust/pxlot/app/src/state -type f -name *.rs)",
-      "Bash(find /c/Users/ryory/work/rust/pxlot -name *.rs -path *tools* -type f)"
+      "Bash(find /c/Users/ryory/work/rust/pxlot -name *.rs -path *tools* -type f)",
+      "Bash(iconv -f UTF-16 -t UTF-8 c:/Users/ryory/work/rust/pxlot/README.md)",
+      "Read(//c/Users/ryory/.claude/projects/c--Users-ryory-work-rust-pxlot/memory/**)"
     ],
     "additionalDirectories": [
       "c:\\Users\\ryory\\work\\rust\\pxlot\\server"
