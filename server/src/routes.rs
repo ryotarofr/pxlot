@@ -1,11 +1,16 @@
-use axum::{Json, extract::{Path, State}, http::StatusCode, response::IntoResponse};
+use axum::{
+    Json,
+    extract::{Path, State},
+    http::StatusCode,
+    response::IntoResponse,
+};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
 
+use crate::AppState;
 use crate::auth;
 use crate::db;
-use crate::AppState;
 
 // ── Request / Response types ─────────────────────────────────
 
@@ -55,16 +60,28 @@ pub struct SaveProjectRequest {
 /// Validate a SaveProjectRequest, returning an error response if invalid.
 fn validate_save_project(req: &SaveProjectRequest) -> Result<(), axum::response::Response> {
     if req.name.is_empty() || req.name.len() > 255 {
-        return Err(err_response(StatusCode::BAD_REQUEST, "Name must be between 1 and 255 characters"));
+        return Err(err_response(
+            StatusCode::BAD_REQUEST,
+            "Name must be between 1 and 255 characters",
+        ));
     }
     if req.width <= 0 || req.width > 4096 {
-        return Err(err_response(StatusCode::BAD_REQUEST, "Width must be between 1 and 4096"));
+        return Err(err_response(
+            StatusCode::BAD_REQUEST,
+            "Width must be between 1 and 4096",
+        ));
     }
     if req.height <= 0 || req.height > 4096 {
-        return Err(err_response(StatusCode::BAD_REQUEST, "Height must be between 1 and 4096"));
+        return Err(err_response(
+            StatusCode::BAD_REQUEST,
+            "Height must be between 1 and 4096",
+        ));
     }
     if req.frame_count <= 0 || req.frame_count > 1000 {
-        return Err(err_response(StatusCode::BAD_REQUEST, "Frame count must be between 1 and 1000"));
+        return Err(err_response(
+            StatusCode::BAD_REQUEST,
+            "Frame count must be between 1 and 1000",
+        ));
     }
     Ok(())
 }
@@ -76,13 +93,19 @@ pub async fn google_auth(
     State(state): State<Arc<AppState>>,
     Json(req): Json<GoogleAuthRequest>,
 ) -> impl IntoResponse {
-    let google_user = match auth::verify_google_id_token(&state.client, &req.id_token, &state.google_client_id).await {
-        Ok(u) => u,
-        Err(e) => {
-            return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({ "error": e })))
-                .into_response();
-        }
-    };
+    let google_user =
+        match auth::verify_google_id_token(&state.client, &req.id_token, &state.google_client_id)
+            .await
+        {
+            Ok(u) => u,
+            Err(e) => {
+                return (
+                    StatusCode::UNAUTHORIZED,
+                    Json(serde_json::json!({ "error": e })),
+                )
+                    .into_response();
+            }
+        };
 
     let email = google_user.email.unwrap_or_default();
     let name = google_user.name.unwrap_or_else(|| "User".to_string());
@@ -118,7 +141,7 @@ pub async fn google_auth(
 pub async fn me(
     State(state): State<Arc<AppState>>,
     headers: axum::http::HeaderMap,
-) -> impl IntoResponse {
+) -> axum::response::Response {
     let user_id = match authenticate(&state, &headers) {
         Ok(id) => id,
         Err(resp) => return resp,
@@ -138,9 +161,7 @@ pub async fn me(
 }
 
 /// GET /api/config — return public configuration
-pub async fn get_config(
-    State(state): State<Arc<AppState>>,
-) -> impl IntoResponse {
+pub async fn get_config(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     (
         StatusCode::OK,
         Json(serde_json::json!({
@@ -207,21 +228,20 @@ pub async fn create_project(
         return resp;
     }
 
-    match db::create_project(
-        &state.pool,
+    let new_project = db::NewProject {
         user_id,
-        &req.name,
-        req.width,
-        req.height,
-        req.frame_count,
-        req.thumbnail.as_deref(),
-        req.thumbnail_gif.as_deref(),
-        req.is_public.unwrap_or(false),
-        req.frame_thumbnails.as_ref(),
-        &req.data,
-    )
-    .await
-    {
+        name: &req.name,
+        width: req.width,
+        height: req.height,
+        frame_count: req.frame_count,
+        thumbnail: req.thumbnail.as_deref(),
+        thumbnail_gif: req.thumbnail_gif.as_deref(),
+        is_public: req.is_public.unwrap_or(false),
+        frame_thumbnails: req.frame_thumbnails.as_ref(),
+        data: &req.data,
+    };
+
+    match db::create_project(&state.pool, new_project).await {
         Ok(meta) => (StatusCode::CREATED, Json(serde_json::json!(meta))).into_response(),
         Err(e) => {
             eprintln!("DB error: {e}");
@@ -246,22 +266,21 @@ pub async fn update_project(
         return resp;
     }
 
-    match db::update_project(
-        &state.pool,
+    let updated_project = db::UpdateProject {
         project_id,
         user_id,
-        &req.name,
-        req.width,
-        req.height,
-        req.frame_count,
-        req.thumbnail.as_deref(),
-        req.thumbnail_gif.as_deref(),
-        req.is_public.unwrap_or(false),
-        req.frame_thumbnails.as_ref(),
-        &req.data,
-    )
-    .await
-    {
+        name: &req.name,
+        width: req.width,
+        height: req.height,
+        frame_count: req.frame_count,
+        thumbnail: req.thumbnail.as_deref(),
+        thumbnail_gif: req.thumbnail_gif.as_deref(),
+        is_public: req.is_public.unwrap_or(false),
+        frame_thumbnails: req.frame_thumbnails.as_ref(),
+        data: &req.data,
+    };
+
+    match db::update_project(&state.pool, updated_project).await {
         Ok(Some(meta)) => (StatusCode::OK, Json(serde_json::json!(meta))).into_response(),
         Ok(None) => err_response(StatusCode::NOT_FOUND, "Project not found"),
         Err(e) => {
@@ -295,9 +314,7 @@ pub async fn delete_project(
 // ── Gallery (public, no auth) ────────────────────────────────
 
 /// GET /api/gallery — list all public projects with author info
-pub async fn list_gallery(
-    State(state): State<Arc<AppState>>,
-) -> impl IntoResponse {
+pub async fn list_gallery(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     match db::list_gallery(&state.pool).await {
         Ok(items) => (StatusCode::OK, Json(serde_json::json!(items))).into_response(),
         Err(e) => {

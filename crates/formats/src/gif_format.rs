@@ -12,8 +12,8 @@ pub fn export_gif(timeline: &Timeline) -> Result<Vec<u8>, String> {
 
     let mut buf = Vec::new();
     {
-        let mut encoder = gif::Encoder::new(&mut buf, width, height, &[])
-            .map_err(|e| e.to_string())?;
+        let mut encoder =
+            gif::Encoder::new(&mut buf, width, height, &[]).map_err(|e| e.to_string())?;
         encoder
             .set_repeat(gif::Repeat::Infinite)
             .map_err(|e| e.to_string())?;
@@ -38,9 +38,7 @@ pub fn export_gif(timeline: &Timeline) -> Result<Vec<u8>, String> {
             // Check if we have transparency
             gif_frame.transparent = Some(0); // Index 0 is transparent
 
-            encoder
-                .write_frame(&gif_frame)
-                .map_err(|e| e.to_string())?;
+            encoder.write_frame(&gif_frame).map_err(|e| e.to_string())?;
         }
     }
     Ok(buf)
@@ -151,11 +149,11 @@ mod tests {
         // Draw something on frame 2 in frame coords
         let fx = timeline.frames[1].canvas.frame_x;
         let fy = timeline.frames[1].canvas.frame_y;
-        timeline.frames[1]
-            .canvas
-            .layers[0]
-            .buffer
-            .set_pixel(fx + 2, fy + 2, Color::new(0, 0, 255, 255));
+        timeline.frames[1].canvas.layers[0].buffer.set_pixel(
+            fx + 2,
+            fy + 2,
+            Color::new(0, 0, 255, 255),
+        );
 
         let gif_data = export_gif(&timeline).unwrap();
         assert!(!gif_data.is_empty());

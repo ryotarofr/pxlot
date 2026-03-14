@@ -2,7 +2,13 @@ mod auth;
 mod db;
 mod routes;
 
-use axum::{Router, extract::{DefaultBodyLimit, State}, http::StatusCode, response::IntoResponse, routing::{get, post}};
+use axum::{
+    Router,
+    extract::{DefaultBodyLimit, State},
+    http::StatusCode,
+    response::IntoResponse,
+    routing::{get, post},
+};
 use reqwest::Client;
 use sqlx::PgPool;
 use std::sync::Arc;
@@ -44,7 +50,8 @@ async fn main() {
         google_client_id,
     });
 
-    let allowed_origin = std::env::var("CORS_ORIGIN").unwrap_or_else(|_| "http://localhost:8080".to_string());
+    let allowed_origin =
+        std::env::var("CORS_ORIGIN").unwrap_or_else(|_| "http://localhost:8080".to_string());
     let cors = CorsLayer::new()
         .allow_origin(allowed_origin.parse::<axum::http::HeaderValue>().unwrap())
         .allow_methods(Any)
@@ -61,8 +68,16 @@ async fn main() {
         .route("/api/gallery", get(routes::list_gallery))
         .route("/api/gallery/{id}", get(routes::get_gallery_detail))
         // Projects
-        .route("/api/projects", get(routes::list_projects).post(routes::create_project))
-        .route("/api/projects/{id}", get(routes::get_project).put(routes::update_project).delete(routes::delete_project))
+        .route(
+            "/api/projects",
+            get(routes::list_projects).post(routes::create_project),
+        )
+        .route(
+            "/api/projects/{id}",
+            get(routes::get_project)
+                .put(routes::update_project)
+                .delete(routes::delete_project),
+        )
         .layer(cors)
         .layer(DefaultBodyLimit::max(10 * 1024 * 1024))
         .with_state(state);
@@ -90,7 +105,7 @@ async fn run_migrations(pool: &PgPool) {
         "CREATE TABLE IF NOT EXISTS _migrations (
             name VARCHAR(255) PRIMARY KEY,
             applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )"
+        )",
     )
     .execute(pool)
     .await
@@ -108,13 +123,12 @@ async fn run_migrations(pool: &PgPool) {
         let name = entry.file_name().to_string_lossy().to_string();
 
         // Check if already applied
-        let applied: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM _migrations WHERE name = $1)"
-        )
-        .bind(&name)
-        .fetch_one(pool)
-        .await
-        .unwrap_or(false);
+        let applied: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM _migrations WHERE name = $1)")
+                .bind(&name)
+                .fetch_one(pool)
+                .await
+                .unwrap_or(false);
 
         if applied {
             continue;
@@ -160,14 +174,11 @@ async fn proxy_messages(
 
     match resp {
         Ok(r) => {
-            let status = StatusCode::from_u16(r.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+            let status =
+                StatusCode::from_u16(r.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
             let body = r.text().await.unwrap_or_default();
             (status, body).into_response()
         }
-        Err(e) => (
-            StatusCode::BAD_GATEWAY,
-            format!("Proxy error: {e}"),
-        )
-            .into_response(),
+        Err(e) => (StatusCode::BAD_GATEWAY, format!("Proxy error: {e}")).into_response(),
     }
 }

@@ -124,11 +124,7 @@ pub async fn get_gallery_detail(id: &str) -> Result<GalleryDetailItem, String> {
 
 // ── Helpers ──────────────────────────────────────────────────
 
-async fn authed_fetch(
-    method: &str,
-    url: &str,
-    body: Option<&str>,
-) -> Result<JsValue, String> {
+async fn authed_fetch(method: &str, url: &str, body: Option<&str>) -> Result<JsValue, String> {
     let token = auth::load_token().ok_or("Not authenticated")?;
     let window = web_sys::window().ok_or("No window")?;
 
@@ -138,8 +134,8 @@ async fn authed_fetch(
         opts.set_body(&JsValue::from_str(b));
     }
 
-    let request = web_sys::Request::new_with_str_and_init(url, &opts)
-        .map_err(|e| format!("{e:?}"))?;
+    let request =
+        web_sys::Request::new_with_str_and_init(url, &opts).map_err(|e| format!("{e:?}"))?;
     request
         .headers()
         .set("Authorization", &format!("Bearer {token}"))
@@ -164,8 +160,8 @@ async fn unauthenticated_fetch(method: &str, url: &str) -> Result<JsValue, Strin
     let opts = web_sys::RequestInit::new();
     opts.set_method(method);
 
-    let request = web_sys::Request::new_with_str_and_init(url, &opts)
-        .map_err(|e| format!("{e:?}"))?;
+    let request =
+        web_sys::Request::new_with_str_and_init(url, &opts).map_err(|e| format!("{e:?}"))?;
 
     let resp = wasm_bindgen_futures::JsFuture::from(window.fetch_with_request(&request))
         .await
@@ -177,11 +173,9 @@ async fn unauthenticated_fetch(method: &str, url: &str) -> Result<JsValue, Strin
 async fn parse_json<T: for<'de> Deserialize<'de>>(resp: &JsValue) -> Result<T, String> {
     let r: &web_sys::Response = resp.unchecked_ref();
 
-    let text = wasm_bindgen_futures::JsFuture::from(
-        r.text().map_err(|e| format!("{e:?}"))?,
-    )
-    .await
-    .map_err(|e| format!("{e:?}"))?;
+    let text = wasm_bindgen_futures::JsFuture::from(r.text().map_err(|e| format!("{e:?}"))?)
+        .await
+        .map_err(|e| format!("{e:?}"))?;
 
     let text = text.as_string().ok_or("Response not a string")?;
 

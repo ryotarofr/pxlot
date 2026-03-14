@@ -36,7 +36,8 @@
       "Bash(cargo check:*)",
       "WebFetch(domain:trap.jp)",
       "Bash(find /c/Users/ryory/work/rust/pxlot/server -type f -name *.rs -o -name *.toml -o -name Dockerfile -o -name docker-compose.yml)",
-      "Bash(find /c/Users/ryory/work/rust/pxlot/server -type f -name *.rs)"
+      "Bash(find /c/Users/ryory/work/rust/pxlot/server -type f -name *.rs)",
+      "Bash(grep -n \"ReadSignal\\\\|WriteSignal\" /c/Users/ryory/work/rust/pxlot/app/src/components/*.rs)"
     ],
     "additionalDirectories": [
       "c:\\Users\\ryory\\work\\rust\\pxlot\\server"

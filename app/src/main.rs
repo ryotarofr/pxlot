@@ -1,6 +1,6 @@
 use leptos::prelude::*;
-use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
+use wasm_bindgen::prelude::*;
 
 mod ai;
 mod auth;
@@ -14,18 +14,18 @@ use components::ai_chat::AiChat;
 use components::ai_panel::{AiPanel, AiResult, AiStatus};
 use components::canvas_view::CanvasView;
 use components::color_picker::ColorPicker;
-use components::layer_panel::{LayerInfo, LayerPanel};
 use components::gallery::GalleryPage;
+use components::layer_panel::{LayerInfo, LayerPanel};
 use components::login::LoginScreen;
 use components::project_list::ProjectList;
-use components::project_list_page::{ProjectListPage, ProjectAction};
+use components::project_list_page::{ProjectAction, ProjectListPage};
 use components::timeline::TimelinePanel;
 use components::tool_panel::ToolPanel;
-use pxlot_core::image_processing::{self, DitherMethod, DownsampleMethod}; // DownsampleMethod used internally
+use i18n::{Lang, t};
 use pxlot_core::Color;
+use pxlot_core::image_processing::{self, DitherMethod, DownsampleMethod}; // DownsampleMethod used internally
 use pxlot_formats::{gif_format, png_format};
-use pxlot_tools::{apply_redo, apply_undo, ToolKind};
-use i18n::{t, Lang};
+use pxlot_tools::{ToolKind, apply_redo, apply_undo};
 use state::EditorState;
 
 fn main() {
@@ -54,7 +54,11 @@ enum AppScreen {
     /// Showing project list.
     Projects,
     /// In the editor — optionally loading a project by ID.
-    Editor { project_id: Option<String>, width: u32, height: u32 },
+    Editor {
+        project_id: Option<String>,
+        width: u32,
+        height: u32,
+    },
 }
 
 /// Read the `project` query parameter from the current URL.
@@ -66,16 +70,20 @@ fn get_project_id_from_url() -> Option<String> {
 
 /// Update the URL query string via `history.replaceState` without page reload.
 fn set_url_project_id(project_id: Option<&str>) {
-    let Some(window) = web_sys::window() else { return };
-    let Ok(pathname) = window.location().pathname() else { return };
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let Ok(pathname) = window.location().pathname() else {
+        return;
+    };
     let base = pathname.trim_end_matches('/');
     let new_url = match project_id {
         Some(id) => format!("{base}?project={id}"),
         None => format!("{base}/"),
     };
-    let _ = window.history().and_then(|h| {
-        h.replace_state_with_url(&JsValue::NULL, "", Some(&new_url))
-    });
+    let _ = window
+        .history()
+        .and_then(|h| h.replace_state_with_url(&JsValue::NULL, "", Some(&new_url)));
 }
 
 /// Root component — routes between login, project list, and editor.
@@ -91,7 +99,11 @@ fn Root() -> impl IntoView {
     let initial_screen = if saved_user.is_none() {
         AppScreen::Login
     } else if let Some(id) = url_project_id {
-        AppScreen::Editor { project_id: Some(id), width: 32, height: 32 }
+        AppScreen::Editor {
+            project_id: Some(id),
+            width: 32,
+            height: 32,
+        }
     } else {
         AppScreen::Projects
     };
@@ -143,16 +155,22 @@ fn Root() -> impl IntoView {
         set_screen.set(AppScreen::Login);
     });
 
-    let on_project_action = Callback::new(move |action: ProjectAction| {
-        match action {
-            ProjectAction::Open(id) => {
-                set_url_project_id(Some(&id));
-                set_screen.set(AppScreen::Editor { project_id: Some(id), width: 32, height: 32 });
-            }
-            ProjectAction::New { width, height } => {
-                set_url_project_id(None);
-                set_screen.set(AppScreen::Editor { project_id: None, width, height });
-            }
+    let on_project_action = Callback::new(move |action: ProjectAction| match action {
+        ProjectAction::Open(id) => {
+            set_url_project_id(Some(&id));
+            set_screen.set(AppScreen::Editor {
+                project_id: Some(id),
+                width: 32,
+                height: 32,
+            });
+        }
+        ProjectAction::New { width, height } => {
+            set_url_project_id(None);
+            set_screen.set(AppScreen::Editor {
+                project_id: None,
+                width,
+                height,
+            });
         }
     });
 
@@ -199,11 +217,7 @@ fn download_bytes(data: &[u8], filename: &str, mime: &str) {
 
     let url = web_sys::Url::create_object_url_with_blob(&blob).unwrap();
 
-    let a: web_sys::HtmlAnchorElement = document
-        .create_element("a")
-        .unwrap()
-        .dyn_into()
-        .unwrap();
+    let a: web_sys::HtmlAnchorElement = document.create_element("a").unwrap().dyn_into().unwrap();
     a.set_href(&url);
     a.set_download(filename);
     a.click();
@@ -522,8 +536,8 @@ fn App(
     let do_export_png = move || {
         let scale = png_scale.get();
         let filename = format!("{}.png", export_filename.get());
-        editor.with_value(|state| {
-            match png_format::export_png_scaled(&state.canvas, scale) {
+        editor.with_value(
+            |state| match png_format::export_png_scaled(&state.canvas, scale) {
                 Ok(data) => {
                     download_bytes(&data, &filename, "image/png");
                 }
@@ -531,8 +545,8 @@ fn App(
                     log::error!("PNG export failed: {}", e);
                     set_status_message.set(Some(format!("PNG export failed: {}", e)));
                 }
-            }
-        });
+            },
+        );
     };
 
     // GIF export handler
@@ -541,15 +555,13 @@ fn App(
         editor.update_value(|state| {
             state.save_frame(); // ensure current frame is saved
         });
-        editor.with_value(|state| {
-            match gif_format::export_gif(&state.timeline) {
-                Ok(data) => {
-                    download_bytes(&data, &filename, "image/gif");
-                }
-                Err(e) => {
-                    log::error!("GIF export failed: {}", e);
-                    set_status_message.set(Some(format!("GIF export failed: {}", e)));
-                }
+        editor.with_value(|state| match gif_format::export_gif(&state.timeline) {
+            Ok(data) => {
+                download_bytes(&data, &filename, "image/gif");
+            }
+            Err(e) => {
+                log::error!("GIF export failed: {}", e);
+                set_status_message.set(Some(format!("GIF export failed: {}", e)));
             }
         });
     };
@@ -575,25 +587,28 @@ fn App(
             // Generate PNG thumbnail from first frame
             let thumb = png_format::export_png_scaled(&state.canvas, 1)
                 .ok()
-                .map(|png_bytes| {
-                    base64::engine::general_purpose::STANDARD.encode(&png_bytes)
-                });
+                .map(|png_bytes| base64::engine::general_purpose::STANDARD.encode(&png_bytes));
             // Generate animated GIF thumbnail if multiple frames
             let gif_thumb = if state.timeline.frame_count() > 1 {
                 gif_format::export_gif(&state.timeline)
                     .ok()
-                    .map(|gif_bytes| {
-                        base64::engine::general_purpose::STANDARD.encode(&gif_bytes)
-                    })
+                    .map(|gif_bytes| base64::engine::general_purpose::STANDARD.encode(&gif_bytes))
             } else {
                 None
             };
             // Generate per-frame thumbnails
-            let frame_thumbnails: Vec<String> = state.timeline.frames.iter().map(|frame| {
-                png_format::export_png_scaled(&frame.canvas, 1)
-                    .map(|png_bytes| base64::engine::general_purpose::STANDARD.encode(&png_bytes))
-                    .unwrap_or_default()
-            }).collect();
+            let frame_thumbnails: Vec<String> = state
+                .timeline
+                .frames
+                .iter()
+                .map(|frame| {
+                    png_format::export_png_scaled(&frame.canvas, 1)
+                        .map(|png_bytes| {
+                            base64::engine::general_purpose::STANDARD.encode(&png_bytes)
+                        })
+                        .unwrap_or_default()
+                })
+                .collect();
             let ft_json = if frame_thumbnails.len() > 1 {
                 serde_json::to_value(&frame_thumbnails).ok()
             } else {
@@ -601,7 +616,17 @@ fn App(
             };
             Some((name, w, h, fc, data, thumb, gif_thumb, ft_json))
         });
-        let Some((name, width, height, frame_count, timeline_json, thumbnail, thumbnail_gif, frame_thumbs)) = save_data else {
+        let Some((
+            name,
+            width,
+            height,
+            frame_count,
+            timeline_json,
+            thumbnail,
+            thumbnail_gif,
+            frame_thumbs,
+        )) = save_data
+        else {
             set_status_message.set(Some("Save failed: serialization error".to_string()));
             return;
         };
@@ -688,9 +713,13 @@ fn App(
     };
 
     let on_file_selected = move |_ev: web_sys::Event| {
-        let Some(input) = file_input_ref.get() else { return };
+        let Some(input) = file_input_ref.get() else {
+            return;
+        };
         let html_input: &web_sys::HtmlInputElement = input.as_ref();
-        let Some(files) = html_input.files() else { return };
+        let Some(files) = html_input.files() else {
+            return;
+        };
         let Some(file) = files.get(0) else { return };
 
         let reader = web_sys::FileReader::new().unwrap();
@@ -801,7 +830,9 @@ fn App(
         });
         editor.with_value(|state| {
             let frame_count = state.timeline.frame_count();
-            if frame_count == 0 { return; }
+            if frame_count == 0 {
+                return;
+            }
             let fw = state.canvas.frame_width();
             let fh = state.canvas.frame_height();
             // Lay out frames horizontally
@@ -817,7 +848,9 @@ fn App(
                     for x in 0..fw {
                         let color = *flat.get_pixel(x, y).unwrap_or(&Color::TRANSPARENT);
                         if color.a > 0 {
-                            sheet_canvas.layers[0].buffer.set_pixel(sfx + ox + x, sfy + y, color);
+                            sheet_canvas.layers[0]
+                                .buffer
+                                .set_pixel(sfx + ox + x, sfy + y, color);
                         }
                     }
                 }
@@ -929,35 +962,37 @@ fn App(
     });
 
     // AI panel callbacks
-    let on_pixelize = Callback::new(move |(w, h, colors, dither): (u32, u32, usize, DitherMethod)| {
-        set_ai_result.set(AiResult {
-            palette_hex: vec![],
-            style_comment: String::new(),
-            status: AiStatus::Loading,
-        });
-        editor.update_value(|state| {
-            let params = image_processing::PixelizeParams {
-                target_width: w,
-                target_height: h,
-                max_colors: colors,
-                dither,
-                downsample: DownsampleMethod::NearestNeighbor,
-                palette: None,
-            };
-            let flat = state.canvas.flatten_frame();
-            let (result, _palette) = image_processing::pixelize(&flat, &params);
-            let new_canvas = image_processing::buffer_to_canvas(result);
-            state.timeline = pxlot_animation::Timeline::new(new_canvas.clone());
-            state.canvas = new_canvas;
-            state.history = pxlot_core::history::History::new();
-        });
-        set_ai_result.set(AiResult {
-            palette_hex: vec![],
-            style_comment: "Pixelization complete.".to_string(),
-            status: AiStatus::Success,
-        });
-        trigger_render();
-    });
+    let on_pixelize = Callback::new(
+        move |(w, h, colors, dither): (u32, u32, usize, DitherMethod)| {
+            set_ai_result.set(AiResult {
+                palette_hex: vec![],
+                style_comment: String::new(),
+                status: AiStatus::Loading,
+            });
+            editor.update_value(|state| {
+                let params = image_processing::PixelizeParams {
+                    target_width: w,
+                    target_height: h,
+                    max_colors: colors,
+                    dither,
+                    downsample: DownsampleMethod::NearestNeighbor,
+                    palette: None,
+                };
+                let flat = state.canvas.flatten_frame();
+                let (result, _palette) = image_processing::pixelize(&flat, &params);
+                let new_canvas = image_processing::buffer_to_canvas(result);
+                state.timeline = pxlot_animation::Timeline::new(new_canvas.clone());
+                state.canvas = new_canvas;
+                state.history = pxlot_core::history::History::new();
+            });
+            set_ai_result.set(AiResult {
+                palette_hex: vec![],
+                style_comment: "Pixelization complete.".to_string(),
+                status: AiStatus::Success,
+            });
+            trigger_render();
+        },
+    );
 
     let on_extract_palette = Callback::new(move |colors: usize| {
         set_ai_result.set(AiResult {
@@ -969,10 +1004,7 @@ fn App(
             let flat = state.canvas.flatten_frame();
             image_processing::extract_palette(&flat, colors)
         });
-        let hex_colors: Vec<String> = palette
-            .iter()
-            .map(|c| c.to_hex())
-            .collect();
+        let hex_colors: Vec<String> = palette.iter().map(|c| c.to_hex()).collect();
         set_ai_result.set(AiResult {
             palette_hex: hex_colors,
             style_comment: format!("Extracted {} colors.", palette.len()),
@@ -1066,8 +1098,17 @@ fn App(
                         if let Some(layer) = state.canvas.active_layer_ref() {
                             for y in sy..(sy + sh) {
                                 for x in sx..(sx + sw) {
-                                    if x >= 0 && y >= 0 && (x as u32) < state.canvas.width && (y as u32) < state.canvas.height {
-                                        pixels.push(*layer.buffer.get_pixel(x as u32, y as u32).unwrap_or(&Color::TRANSPARENT));
+                                    if x >= 0
+                                        && y >= 0
+                                        && (x as u32) < state.canvas.width
+                                        && (y as u32) < state.canvas.height
+                                    {
+                                        pixels.push(
+                                            *layer
+                                                .buffer
+                                                .get_pixel(x as u32, y as u32)
+                                                .unwrap_or(&Color::TRANSPARENT),
+                                        );
                                     } else {
                                         pixels.push(Color::TRANSPARENT);
                                     }
@@ -1088,16 +1129,30 @@ fn App(
                 editor.update_value(|state| {
                     let clip = state.clipboard.clone();
                     if let Some(clip) = clip {
-                        let default_paste = (state.canvas.frame_x as i32, state.canvas.frame_y as i32);
-                        let (ox, oy) = state.selection.map(|(x, y, _, _)| (x, y)).unwrap_or(default_paste);
+                        let default_paste =
+                            (state.canvas.frame_x as i32, state.canvas.frame_y as i32);
+                        let (ox, oy) = state
+                            .selection
+                            .map(|(x, y, _, _)| (x, y))
+                            .unwrap_or(default_paste);
                         let mut cmd = pxlot_core::history::Command::new("Paste");
                         for cy in 0..clip.height {
                             for cx in 0..clip.width {
                                 let px = ox + cx as i32;
                                 let py = oy + cy as i32;
-                                if px >= 0 && py >= 0 && (px as u32) < state.canvas.width && (py as u32) < state.canvas.height {
+                                if px >= 0
+                                    && py >= 0
+                                    && (px as u32) < state.canvas.width
+                                    && (py as u32) < state.canvas.height
+                                {
                                     let color = clip.pixels[(cy * clip.width + cx) as usize];
-                                    pxlot_tools::pencil_pixel(&mut state.canvas, px as u32, py as u32, color, &mut cmd);
+                                    pxlot_tools::pencil_pixel(
+                                        &mut state.canvas,
+                                        px as u32,
+                                        py as u32,
+                                        color,
+                                        &mut cmd,
+                                    );
                                 }
                             }
                         }
@@ -1116,10 +1171,25 @@ fn App(
                         if let Some(_) = state.canvas.active_layer_ref() {
                             for y in sy..(sy + sh) {
                                 for x in sx..(sx + sw) {
-                                    if x >= 0 && y >= 0 && (x as u32) < state.canvas.width && (y as u32) < state.canvas.height {
+                                    if x >= 0
+                                        && y >= 0
+                                        && (x as u32) < state.canvas.width
+                                        && (y as u32) < state.canvas.height
+                                    {
                                         let layer = &state.canvas.layers[state.canvas.active_layer];
-                                        pixels.push(*layer.buffer.get_pixel(x as u32, y as u32).unwrap_or(&Color::TRANSPARENT));
-                                        pxlot_tools::pencil_pixel(&mut state.canvas, x as u32, y as u32, Color::TRANSPARENT, &mut cmd);
+                                        pixels.push(
+                                            *layer
+                                                .buffer
+                                                .get_pixel(x as u32, y as u32)
+                                                .unwrap_or(&Color::TRANSPARENT),
+                                        );
+                                        pxlot_tools::pencil_pixel(
+                                            &mut state.canvas,
+                                            x as u32,
+                                            y as u32,
+                                            Color::TRANSPARENT,
+                                            &mut cmd,
+                                        );
                                     } else {
                                         pixels.push(Color::TRANSPARENT);
                                     }

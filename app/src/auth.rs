@@ -63,11 +63,9 @@ pub async fn fetch_config() -> Result<String, String> {
 
     let resp: web_sys::Response = resp.dyn_into().map_err(|e| format!("{e:?}"))?;
 
-    let text = wasm_bindgen_futures::JsFuture::from(
-        resp.text().map_err(|e| format!("{e:?}"))?,
-    )
-    .await
-    .map_err(|e| format!("{e:?}"))?;
+    let text = wasm_bindgen_futures::JsFuture::from(resp.text().map_err(|e| format!("{e:?}"))?)
+        .await
+        .map_err(|e| format!("{e:?}"))?;
 
     let text = text.as_string().ok_or("Response not a string")?;
     let json: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("{e}"))?;
@@ -101,11 +99,9 @@ pub async fn login_with_google(id_token: &str) -> Result<AuthResponse, String> {
 
     let resp: web_sys::Response = resp.dyn_into().map_err(|e| format!("{e:?}"))?;
 
-    let text = wasm_bindgen_futures::JsFuture::from(
-        resp.text().map_err(|e| format!("{e:?}"))?,
-    )
-    .await
-    .map_err(|e| format!("{e:?}"))?;
+    let text = wasm_bindgen_futures::JsFuture::from(resp.text().map_err(|e| format!("{e:?}"))?)
+        .await
+        .map_err(|e| format!("{e:?}"))?;
 
     let text = text.as_string().ok_or("Response not a string")?;
 
@@ -148,11 +144,9 @@ pub async fn verify_token() -> Result<AuthUser, String> {
         return Err("Token expired".to_string());
     }
 
-    let text = wasm_bindgen_futures::JsFuture::from(
-        resp.text().map_err(|e| format!("{e:?}"))?,
-    )
-    .await
-    .map_err(|e| format!("{e:?}"))?;
+    let text = wasm_bindgen_futures::JsFuture::from(resp.text().map_err(|e| format!("{e:?}"))?)
+        .await
+        .map_err(|e| format!("{e:?}"))?;
 
     let text = text.as_string().ok_or("Response not a string")?;
     let user: AuthUser = serde_json::from_str(&text).map_err(|e| format!("Parse error: {e}"))?;

@@ -52,7 +52,8 @@ pub fn AiChat(
                 set_panel_width.set(new_width);
             },
         );
-        let move_fn: js_sys::Function = on_move.as_ref().unchecked_ref::<js_sys::Function>().clone();
+        let move_fn: js_sys::Function =
+            on_move.as_ref().unchecked_ref::<js_sys::Function>().clone();
         // Keep alive until mouseup
         std::mem::forget(on_move);
 
@@ -260,7 +261,8 @@ fn render_message(msg: &ChatMessage) -> leptos::prelude::AnyView {
                     </span>
                     <span class="ai-msg-text">{text}</span>
                 </div>
-            }.into_any()
+            }
+            .into_any()
         }
         ChatContent::ToolUse { name, status } => {
             let status_class = match status {
@@ -279,7 +281,8 @@ fn render_message(msg: &ChatMessage) -> leptos::prelude::AnyView {
                     <span class="ai-tool-name">{format!("[{}]", name)}</span>
                     <span class="ai-tool-status">{status_text}</span>
                 </div>
-            }.into_any()
+            }
+            .into_any()
         }
         ChatContent::Status(text) => {
             let text = text.clone();
@@ -287,7 +290,8 @@ fn render_message(msg: &ChatMessage) -> leptos::prelude::AnyView {
                 <div class="ai-chat-msg ai-chat-status">
                     <span>{text}</span>
                 </div>
-            }.into_any()
+            }
+            .into_any()
         }
     }
 }

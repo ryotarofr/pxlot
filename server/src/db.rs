@@ -150,34 +150,39 @@ pub async fn get_project(
 }
 
 /// Create a new project.
+#[derive(Debug)]
+pub struct NewProject<'a> {
+    pub user_id: Uuid,
+    pub name: &'a str,
+    pub width: i32,
+    pub height: i32,
+    pub frame_count: i32,
+    pub thumbnail: Option<&'a str>,
+    pub thumbnail_gif: Option<&'a str>,
+    pub is_public: bool,
+    pub frame_thumbnails: Option<&'a serde_json::Value>,
+    pub data: &'a serde_json::Value,
+}
+
 pub async fn create_project(
     pool: &PgPool,
-    user_id: Uuid,
-    name: &str,
-    width: i32,
-    height: i32,
-    frame_count: i32,
-    thumbnail: Option<&str>,
-    thumbnail_gif: Option<&str>,
-    is_public: bool,
-    frame_thumbnails: Option<&serde_json::Value>,
-    data: &serde_json::Value,
+    project: NewProject<'_>,
 ) -> Result<ProjectMeta, sqlx::Error> {
     let row: ProjectMeta = sqlx::query_as(
         r#"INSERT INTO projects (user_id, name, width, height, frame_count, thumbnail, thumbnail_gif, is_public, frame_thumbnails, data)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
            RETURNING id, user_id, name, width, height, frame_count, thumbnail, thumbnail_gif, is_public, created_at, updated_at"#,
     )
-    .bind(user_id)
-    .bind(name)
-    .bind(width)
-    .bind(height)
-    .bind(frame_count)
-    .bind(thumbnail)
-    .bind(thumbnail_gif)
-    .bind(is_public)
-    .bind(frame_thumbnails)
-    .bind(data)
+    .bind(project.user_id)
+    .bind(project.name)
+    .bind(project.width)
+    .bind(project.height)
+    .bind(project.frame_count)
+    .bind(project.thumbnail)
+    .bind(project.thumbnail_gif)
+    .bind(project.is_public)
+    .bind(project.frame_thumbnails)
+    .bind(project.data)
     .fetch_one(pool)
     .await?;
 
@@ -185,19 +190,24 @@ pub async fn create_project(
 }
 
 /// Update an existing project (must belong to user).
+#[derive(Debug)]
+pub struct UpdateProject<'a> {
+    pub project_id: Uuid,
+    pub user_id: Uuid,
+    pub name: &'a str,
+    pub width: i32,
+    pub height: i32,
+    pub frame_count: i32,
+    pub thumbnail: Option<&'a str>,
+    pub thumbnail_gif: Option<&'a str>,
+    pub is_public: bool,
+    pub frame_thumbnails: Option<&'a serde_json::Value>,
+    pub data: &'a serde_json::Value,
+}
+
 pub async fn update_project(
     pool: &PgPool,
-    project_id: Uuid,
-    user_id: Uuid,
-    name: &str,
-    width: i32,
-    height: i32,
-    frame_count: i32,
-    thumbnail: Option<&str>,
-    thumbnail_gif: Option<&str>,
-    is_public: bool,
-    frame_thumbnails: Option<&serde_json::Value>,
-    data: &serde_json::Value,
+    project: UpdateProject<'_>,
 ) -> Result<Option<ProjectMeta>, sqlx::Error> {
     let row: Option<ProjectMeta> = sqlx::query_as(
         r#"UPDATE projects
@@ -207,17 +217,17 @@ pub async fn update_project(
            WHERE id = $1 AND user_id = $2
            RETURNING id, user_id, name, width, height, frame_count, thumbnail, thumbnail_gif, is_public, created_at, updated_at"#,
     )
-    .bind(project_id)
-    .bind(user_id)
-    .bind(name)
-    .bind(width)
-    .bind(height)
-    .bind(frame_count)
-    .bind(thumbnail)
-    .bind(thumbnail_gif)
-    .bind(is_public)
-    .bind(frame_thumbnails)
-    .bind(data)
+    .bind(project.project_id)
+    .bind(project.user_id)
+    .bind(project.name)
+    .bind(project.width)
+    .bind(project.height)
+    .bind(project.frame_count)
+    .bind(project.thumbnail)
+    .bind(project.thumbnail_gif)
+    .bind(project.is_public)
+    .bind(project.frame_thumbnails)
+    .bind(project.data)
     .fetch_optional(pool)
     .await?;
 
@@ -242,7 +252,10 @@ pub async fn list_gallery(pool: &PgPool) -> Result<Vec<GalleryItem>, sqlx::Error
 }
 
 /// Get a single public gallery item with frame thumbnails.
-pub async fn get_gallery_detail(pool: &PgPool, project_id: Uuid) -> Result<Option<GalleryDetail>, sqlx::Error> {
+pub async fn get_gallery_detail(
+    pool: &PgPool,
+    project_id: Uuid,
+) -> Result<Option<GalleryDetail>, sqlx::Error> {
     let row: Option<GalleryDetail> = sqlx::query_as(
         r#"SELECT p.id, p.name, p.width, p.height, p.frame_count,
                   p.thumbnail, p.thumbnail_gif, p.frame_thumbnails, p.created_at,

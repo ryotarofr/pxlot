@@ -2,7 +2,7 @@
 /// Maps LLM tool_use calls to pxlot_tools / Canvas operations.
 use pxlot_core::history::Command;
 use pxlot_core::{Canvas, Color};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::api_client::ToolDefinition;
 
@@ -265,12 +265,20 @@ fn exec_set_pixels(input: &Value, canvas: &mut Canvas, cmd: &mut Command) -> Too
     ok(format!("Set {count} pixels"))
 }
 
-fn exec_draw_shape(name: &str, input: &Value, canvas: &mut Canvas, cmd: &mut Command) -> ToolExecResult {
+fn exec_draw_shape(
+    name: &str,
+    input: &Value,
+    canvas: &mut Canvas,
+    cmd: &mut Command,
+) -> ToolExecResult {
     let x0 = input.get("x0").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
     let y0 = input.get("y0").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
     let x1 = input.get("x1").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
     let y1 = input.get("y1").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-    let hex = input.get("color").and_then(|v| v.as_str()).unwrap_or("#ffffff");
+    let hex = input
+        .get("color")
+        .and_then(|v| v.as_str())
+        .unwrap_or("#ffffff");
     let color = match parse_color(hex) {
         Ok(c) => c,
         Err(e) => return err(e),
@@ -287,7 +295,9 @@ fn exec_draw_shape(name: &str, input: &Value, canvas: &mut Canvas, cmd: &mut Com
         "draw_rect" => pxlot_tools::draw_rect(canvas, bx0, by0, bx1, by1, color, cmd),
         "draw_filled_rect" => pxlot_tools::draw_filled_rect(canvas, bx0, by0, bx1, by1, color, cmd),
         "draw_ellipse" => pxlot_tools::draw_ellipse(canvas, bx0, by0, bx1, by1, color, cmd),
-        "draw_filled_ellipse" => pxlot_tools::draw_filled_ellipse(canvas, bx0, by0, bx1, by1, color, cmd),
+        "draw_filled_ellipse" => {
+            pxlot_tools::draw_filled_ellipse(canvas, bx0, by0, bx1, by1, color, cmd)
+        }
         _ => unreachable!(),
     }
     ok(format!("{name} OK"))
@@ -296,7 +306,10 @@ fn exec_draw_shape(name: &str, input: &Value, canvas: &mut Canvas, cmd: &mut Com
 fn exec_flood_fill(input: &Value, canvas: &mut Canvas, cmd: &mut Command) -> ToolExecResult {
     let x = input.get("x").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
     let y = input.get("y").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-    let hex = input.get("color").and_then(|v| v.as_str()).unwrap_or("#ffffff");
+    let hex = input
+        .get("color")
+        .and_then(|v| v.as_str())
+        .unwrap_or("#ffffff");
     let color = match parse_color(hex) {
         Ok(c) => c,
         Err(e) => return err(e),

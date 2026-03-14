@@ -99,8 +99,10 @@ impl EditorState {
 
     /// Center the view on the frame area given the viewport dimensions.
     pub fn center_on_frame(&mut self, viewport_w: f64, viewport_h: f64) {
-        let frame_cx = (self.canvas.frame_x as f64 + self.canvas.frame_width() as f64 / 2.0) * self.zoom;
-        let frame_cy = (self.canvas.frame_y as f64 + self.canvas.frame_height() as f64 / 2.0) * self.zoom;
+        let frame_cx =
+            (self.canvas.frame_x as f64 + self.canvas.frame_width() as f64 / 2.0) * self.zoom;
+        let frame_cy =
+            (self.canvas.frame_y as f64 + self.canvas.frame_height() as f64 / 2.0) * self.zoom;
         self.pan_x = viewport_w / 2.0 - frame_cx;
         self.pan_y = viewport_h / 2.0 - frame_cy;
     }

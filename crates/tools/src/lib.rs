@@ -1,5 +1,5 @@
-use pxlot_core::{Canvas, Color};
 use pxlot_core::history::Command;
+use pxlot_core::{Canvas, Color};
 use std::collections::VecDeque;
 
 /// Available drawing tools.
@@ -24,11 +24,11 @@ pub fn pencil_pixel(canvas: &mut Canvas, x: u32, y: u32, color: Color, cmd: &mut
         if layer.locked || !layer.visible {
             return;
         }
-        if let Some(&old) = layer.buffer.get_pixel(x, y) {
-            if old != color {
-                cmd.add_change(layer_idx, x, y, old, color);
-                layer.buffer.set_pixel(x, y, color);
-            }
+        if let Some(&old) = layer.buffer.get_pixel(x, y)
+            && old != color
+        {
+            cmd.add_change(layer_idx, x, y, old, color);
+            layer.buffer.set_pixel(x, y, color);
         }
     }
 }
@@ -71,14 +71,7 @@ pub fn pencil_line(
 }
 
 /// Erase pixels along a line (set to transparent).
-pub fn eraser_line(
-    canvas: &mut Canvas,
-    x0: i32,
-    y0: i32,
-    x1: i32,
-    y1: i32,
-    cmd: &mut Command,
-) {
+pub fn eraser_line(canvas: &mut Canvas, x0: i32, y0: i32, x1: i32, y1: i32, cmd: &mut Command) {
     pencil_line(canvas, x0, y0, x1, y1, Color::TRANSPARENT, cmd);
 }
 
@@ -87,7 +80,13 @@ const MAX_FLOOD_FILL_PIXELS: usize = 512 * 512;
 
 /// Flood fill from (x, y) with the given color.
 /// Returns true if the fill completed, false if it was aborted due to size limit.
-pub fn flood_fill(canvas: &mut Canvas, x: u32, y: u32, fill_color: Color, cmd: &mut Command) -> bool {
+pub fn flood_fill(
+    canvas: &mut Canvas,
+    x: u32,
+    y: u32,
+    fill_color: Color,
+    cmd: &mut Command,
+) -> bool {
     let layer_idx = canvas.active_layer;
     let Some(layer) = canvas.active_layer_mut() else {
         return false;
@@ -124,16 +123,36 @@ pub fn flood_fill(canvas: &mut Canvas, x: u32, y: u32, fill_color: Color, cmd: &
         cmd.add_change(layer_idx, px, py, current, fill_color);
         layer.buffer.set_pixel(px, py, fill_color);
 
-        if px > 0 && layer.buffer.get_pixel(px - 1, py).is_some_and(|c| *c == target_color) {
+        if px > 0
+            && layer
+                .buffer
+                .get_pixel(px - 1, py)
+                .is_some_and(|c| *c == target_color)
+        {
             queue.push_back((px - 1, py));
         }
-        if px + 1 < w && layer.buffer.get_pixel(px + 1, py).is_some_and(|c| *c == target_color) {
+        if px + 1 < w
+            && layer
+                .buffer
+                .get_pixel(px + 1, py)
+                .is_some_and(|c| *c == target_color)
+        {
             queue.push_back((px + 1, py));
         }
-        if py > 0 && layer.buffer.get_pixel(px, py - 1).is_some_and(|c| *c == target_color) {
+        if py > 0
+            && layer
+                .buffer
+                .get_pixel(px, py - 1)
+                .is_some_and(|c| *c == target_color)
+        {
             queue.push_back((px, py - 1));
         }
-        if py + 1 < h && layer.buffer.get_pixel(px, py + 1).is_some_and(|c| *c == target_color) {
+        if py + 1 < h
+            && layer
+                .buffer
+                .get_pixel(px, py + 1)
+                .is_some_and(|c| *c == target_color)
+        {
             queue.push_back((px, py + 1));
         }
     }
@@ -485,7 +504,9 @@ mod tests {
         assert_eq!(cmd.changes.len(), 4);
         for i in 0..4 {
             assert_eq!(
-                canvas.layers[0].buffer.get_pixel(canvas.frame_x + i, canvas.frame_y),
+                canvas.layers[0]
+                    .buffer
+                    .get_pixel(canvas.frame_x + i, canvas.frame_y),
                 Some(&Color::WHITE)
             );
         }
@@ -500,7 +521,7 @@ mod tests {
         // Flood fill fills connected transparent area - entire buffer since all is transparent
         flood_fill(&mut canvas, fx, fy, Color::new(255, 0, 0, 255), &mut cmd);
         // All buffer pixels get filled (buffer is 12x12 = 144 for a 4x4 frame)
-        assert!(cmd.changes.len() > 0);
+        assert!(!cmd.changes.is_empty());
     }
 
     #[test]
@@ -529,7 +550,15 @@ mod tests {
         let fx = canvas.frame_x as i32;
         let fy = canvas.frame_y as i32;
         let mut cmd = Command::new("rect");
-        draw_rect(&mut canvas, fx + 1, fy + 1, fx + 4, fy + 4, Color::WHITE, &mut cmd);
+        draw_rect(
+            &mut canvas,
+            fx + 1,
+            fy + 1,
+            fx + 4,
+            fy + 4,
+            Color::WHITE,
+            &mut cmd,
+        );
         // Perimeter of 4x4 rect: 4+4+2+2 = 12
         assert_eq!(cmd.changes.len(), 12);
     }
@@ -540,8 +569,16 @@ mod tests {
         let fx = canvas.frame_x as i32;
         let fy = canvas.frame_y as i32;
         let mut cmd = Command::new("ellipse");
-        draw_ellipse(&mut canvas, fx + 2, fy + 2, fx + 10, fy + 8, Color::WHITE, &mut cmd);
-        assert!(cmd.changes.len() > 0);
+        draw_ellipse(
+            &mut canvas,
+            fx + 2,
+            fy + 2,
+            fx + 10,
+            fy + 8,
+            Color::WHITE,
+            &mut cmd,
+        );
+        assert!(!cmd.changes.is_empty());
     }
 
     #[test]
@@ -564,13 +601,19 @@ mod tests {
         let mut cmd = Command::new("draw");
         pencil_pixel(&mut canvas, bx, by, Color::WHITE, &mut cmd);
 
-        assert_eq!(canvas.layers[0].buffer.get_pixel(bx, by), Some(&Color::WHITE));
+        assert_eq!(
+            canvas.layers[0].buffer.get_pixel(bx, by),
+            Some(&Color::WHITE)
+        );
         apply_undo(&mut canvas, &cmd);
         assert_eq!(
             canvas.layers[0].buffer.get_pixel(bx, by),
             Some(&Color::TRANSPARENT)
         );
         apply_redo(&mut canvas, &cmd);
-        assert_eq!(canvas.layers[0].buffer.get_pixel(bx, by), Some(&Color::WHITE));
+        assert_eq!(
+            canvas.layers[0].buffer.get_pixel(bx, by),
+            Some(&Color::WHITE)
+        );
     }
 }

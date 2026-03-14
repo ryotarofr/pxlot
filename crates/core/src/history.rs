@@ -1,6 +1,6 @@
-use serde::{Serialize, Deserialize};
-use std::collections::VecDeque;
 use crate::Color;
+use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 
 /// A single pixel change for diff-based undo.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,7 +27,14 @@ impl Command {
         }
     }
 
-    pub fn add_change(&mut self, layer_index: usize, x: u32, y: u32, old_color: Color, new_color: Color) {
+    pub fn add_change(
+        &mut self,
+        layer_index: usize,
+        x: u32,
+        y: u32,
+        old_color: Color,
+        new_color: Color,
+    ) {
         if old_color != new_color {
             self.changes.push(PixelChange {
                 layer_index,
@@ -58,6 +65,12 @@ pub struct History {
     undo_stack: VecDeque<Command>,
     redo_stack: Vec<Command>,
     total_bytes: usize,
+}
+
+impl Default for History {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl History {

@@ -43,7 +43,12 @@ impl Default for PixelizeParams {
 }
 
 /// Downsample a pixel buffer to target dimensions.
-pub fn downsample(src: &PixelBuffer, target_w: u32, target_h: u32, method: DownsampleMethod) -> PixelBuffer {
+pub fn downsample(
+    src: &PixelBuffer,
+    target_w: u32,
+    target_h: u32,
+    method: DownsampleMethod,
+) -> PixelBuffer {
     let mut dst = PixelBuffer::new(target_w, target_h);
 
     match method {
@@ -92,12 +97,16 @@ pub fn downsample(src: &PixelBuffer, target_w: u32, target_h: u32, method: Downs
                     }
 
                     if count > 0 {
-                        dst.set_pixel(tx, ty, Color::new(
-                            (r_sum / count) as u8,
-                            (g_sum / count) as u8,
-                            (b_sum / count) as u8,
-                            (a_sum / count) as u8,
-                        ));
+                        dst.set_pixel(
+                            tx,
+                            ty,
+                            Color::new(
+                                (r_sum / count) as u8,
+                                (g_sum / count) as u8,
+                                (b_sum / count) as u8,
+                                (a_sum / count) as u8,
+                            ),
+                        );
                     }
                 }
             }
@@ -360,7 +369,12 @@ fn reduce_ordered(buf: &mut PixelBuffer, palette: &[Color], size: u32) {
 /// Full pixelization pipeline: downsample → extract/constrain palette → reduce colors.
 pub fn pixelize(src: &PixelBuffer, params: &PixelizeParams) -> (PixelBuffer, Vec<Color>) {
     // Step 1: Downsample
-    let mut result = downsample(src, params.target_width, params.target_height, params.downsample);
+    let mut result = downsample(
+        src,
+        params.target_width,
+        params.target_height,
+        params.downsample,
+    );
 
     // Step 2: Determine palette
     let palette = if let Some(ref hex_colors) = params.palette {
@@ -455,10 +469,7 @@ mod tests {
         buf.set_pixel(0, 1, Color::new(180, 20, 30, 255));
         buf.set_pixel(1, 1, Color::new(20, 30, 180, 255));
 
-        let palette = vec![
-            Color::new(255, 0, 0, 255),
-            Color::new(0, 0, 255, 255),
-        ];
+        let palette = vec![Color::new(255, 0, 0, 255), Color::new(0, 0, 255, 255)];
         reduce_colors(&mut buf, &palette, DitherMethod::None);
 
         assert_eq!(buf.get_pixel(0, 0).unwrap().r, 255); // red

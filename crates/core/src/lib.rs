@@ -14,9 +14,24 @@ pub struct Color {
 }
 
 impl Color {
-    pub const TRANSPARENT: Self = Self { r: 0, g: 0, b: 0, a: 0 };
-    pub const BLACK: Self = Self { r: 0, g: 0, b: 0, a: 255 };
-    pub const WHITE: Self = Self { r: 255, g: 255, b: 255, a: 255 };
+    pub const TRANSPARENT: Self = Self {
+        r: 0,
+        g: 0,
+        b: 0,
+        a: 0,
+    };
+    pub const BLACK: Self = Self {
+        r: 0,
+        g: 0,
+        b: 0,
+        a: 255,
+    };
+    pub const WHITE: Self = Self {
+        r: 255,
+        g: 255,
+        b: 255,
+        a: 255,
+    };
 
     pub const fn new(r: u8, g: u8, b: u8, a: u8) -> Self {
         Self { r, g, b, a }
@@ -64,7 +79,11 @@ pub struct PixelBuffer {
 impl PixelBuffer {
     pub fn new(width: u32, height: u32) -> Self {
         let pixels = vec![Color::TRANSPARENT; (width * height) as usize];
-        Self { width, height, pixels }
+        Self {
+            width,
+            height,
+            pixels,
+        }
     }
 
     pub fn get_pixel(&self, x: u32, y: u32) -> Option<&Color> {
@@ -137,7 +156,11 @@ fn blend_pixel(dst: &mut [u8], src: &Color, layer_opacity: f64) {
     let dg = dst[1] as f64 / 255.0;
     let db = dst[2] as f64 / 255.0;
     let da = dst[3] as f64 / 255.0;
-    let (sr, sg, sb) = (src.r as f64 / 255.0, src.g as f64 / 255.0, src.b as f64 / 255.0);
+    let (sr, sg, sb) = (
+        src.r as f64 / 255.0,
+        src.g as f64 / 255.0,
+        src.b as f64 / 255.0,
+    );
     let out_a = sa + da * (1.0 - sa);
     if out_a > 0.0 {
         dst[0] = ((sr * sa + dr * da * (1.0 - sa)) / out_a * 255.0 + 0.5) as u8;
@@ -196,12 +219,20 @@ impl Canvas {
 
     /// Frame width for export. Handles backward compat (frame_w==0).
     pub fn frame_width(&self) -> u32 {
-        if self.frame_w > 0 { self.frame_w } else { self.width }
+        if self.frame_w > 0 {
+            self.frame_w
+        } else {
+            self.width
+        }
     }
 
     /// Frame height for export. Handles backward compat (frame_h==0).
     pub fn frame_height(&self) -> u32 {
-        if self.frame_h > 0 { self.frame_h } else { self.height }
+        if self.frame_h > 0 {
+            self.frame_h
+        } else {
+            self.height
+        }
     }
 
     /// Convert frame-relative X to buffer X.
@@ -440,7 +471,7 @@ mod tests {
         assert_eq!(canvas.frame_height(), 32);
         assert_eq!(canvas.frame_x, 32); // margin = min(32, 64) = 32
         assert_eq!(canvas.frame_y, 32);
-        assert_eq!(canvas.width, 96);   // 32 + 2*32
+        assert_eq!(canvas.width, 96); // 32 + 2*32
         assert_eq!(canvas.height, 96);
     }
 
@@ -471,11 +502,13 @@ mod tests {
         // Set pixel at frame (0,0) = buffer (margin, margin)
         let bx = canvas.frame_x;
         let by = canvas.frame_y;
-        canvas.layers[0].buffer.set_pixel(bx, by, Color::new(255, 0, 0, 255));
+        canvas.layers[0]
+            .buffer
+            .set_pixel(bx, by, Color::new(255, 0, 0, 255));
         let flat = canvas.flatten_frame_visible();
         assert_eq!(flat[0], 255); // R
-        assert_eq!(flat[1], 0);   // G
-        assert_eq!(flat[2], 0);   // B
+        assert_eq!(flat[1], 0); // G
+        assert_eq!(flat[2], 0); // B
         assert_eq!(flat[3], 255); // A
     }
 }

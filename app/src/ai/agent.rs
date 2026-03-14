@@ -6,13 +6,13 @@
 use leptos::prelude::*;
 use pxlot_core::history::Command;
 use serde::Deserialize;
-use serde_json::{json, Value};
-use std::sync::atomic::{AtomicBool, Ordering};
+use serde_json::{Value, json};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
+use crate::ai::ChatMessage;
 use crate::ai::api_client::{self, ApiMessage, ContentBlock, MessagesRequest};
 use crate::ai::tools;
-use crate::ai::ChatMessage;
 use crate::state::EditorState;
 
 /// Maximum operations to execute per frame.
@@ -268,14 +268,8 @@ pub async fn run_agent(
 
         // Execute operations for this frame
         let ops = &frame_ops[..frame_ops.len().min(MAX_OPS_PER_FRAME)];
-        let executed = execute_frame_ops(
-            ops,
-            offset_x,
-            offset_y,
-            &editor,
-            &set_messages,
-            &stop_flag,
-        );
+        let executed =
+            execute_frame_ops(ops, offset_x, offset_y, &editor, &set_messages, &stop_flag);
         total_executed += executed;
 
         // Save frame to timeline
@@ -342,10 +336,7 @@ fn execute_frame_ops(
 
         // Show tool in chat
         set_messages.update(|msgs| {
-            msgs.push(ChatMessage::tool(
-                tool_name,
-                crate::ai::ToolStatus::Running,
-            ));
+            msgs.push(ChatMessage::tool(tool_name, crate::ai::ToolStatus::Running));
         });
 
         // Execute on canvas
@@ -354,8 +345,7 @@ fn execute_frame_ops(
 
         editor.update_value(|state| {
             let mut cmd = Command::new(format!("ai:{tool_name}"));
-            let result =
-                tools::execute_tool(tool_name, &offset_op, &mut state.canvas, &mut cmd);
+            let result = tools::execute_tool(tool_name, &offset_op, &mut state.canvas, &mut cmd);
             if !cmd.is_empty() {
                 state.history.push(cmd);
             }

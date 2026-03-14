@@ -5,8 +5,8 @@ use uuid::Uuid;
 /// JWT claims stored in our app tokens.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {
-    pub sub: Uuid,   // user id
-    pub exp: usize,  // expiry (unix timestamp)
+    pub sub: Uuid,  // user id
+    pub exp: usize, // expiry (unix timestamp)
 }
 
 /// Create a JWT for the given user id.
@@ -16,13 +16,14 @@ pub fn create_token(user_id: Uuid, secret: &str) -> Result<String, String> {
         .ok_or_else(|| "Failed to compute token expiry timestamp".to_string())?
         .timestamp() as usize;
 
-    let claims = Claims {
-        sub: user_id,
-        exp,
-    };
+    let claims = Claims { sub: user_id, exp };
 
-    encode(&Header::default(), &claims, &EncodingKey::from_secret(secret.as_bytes()))
-        .map_err(|e| format!("Failed to encode JWT: {e}"))
+    encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(secret.as_bytes()),
+    )
+    .map_err(|e| format!("Failed to encode JWT: {e}"))
 }
 
 /// Verify a JWT and return the claims.

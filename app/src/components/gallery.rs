@@ -1,18 +1,21 @@
 use leptos::prelude::*;
 
-use crate::project_api::{self, GalleryItem, GalleryDetailItem};
+use crate::project_api::{self, GalleryDetailItem, GalleryItem};
 
 /// A single gallery card with play/pause toggle for animations.
 #[component]
-fn GalleryCard(
-    item: GalleryItem,
-    on_select: Callback<GalleryItem>,
-) -> impl IntoView {
+fn GalleryCard(item: GalleryItem, on_select: Callback<GalleryItem>) -> impl IntoView {
     let has_animation = item.frame_count > 1 && item.thumbnail_gif.is_some();
     let (playing, set_playing) = signal(true);
 
-    let gif_src = item.thumbnail_gif.clone().map(|g| format!("data:image/gif;base64,{g}"));
-    let png_src = item.thumbnail.clone().map(|t| format!("data:image/png;base64,{t}"));
+    let gif_src = item
+        .thumbnail_gif
+        .clone()
+        .map(|g| format!("data:image/gif;base64,{g}"));
+    let png_src = item
+        .thumbnail
+        .clone()
+        .map(|t| format!("data:image/png;base64,{t}"));
 
     let item_for_click = item.clone();
 
@@ -80,18 +83,21 @@ fn GalleryCard(
 
 /// Detail modal for a gallery item — fetches frame thumbnails from API.
 #[component]
-fn GalleryDetail(
-    item: GalleryItem,
-    on_close: Callback<()>,
-) -> impl IntoView {
+fn GalleryDetail(item: GalleryItem, on_close: Callback<()>) -> impl IntoView {
     let has_animation = item.frame_count > 1 && item.thumbnail_gif.is_some();
     let (playing, set_playing) = signal(true);
     let (current_frame, set_current_frame) = signal(0usize);
     let (detail, set_detail) = signal(Option::<GalleryDetailItem>::None);
     let (loading_frames, set_loading_frames) = signal(false);
 
-    let gif_src = item.thumbnail_gif.clone().map(|g| format!("data:image/gif;base64,{g}"));
-    let png_src = item.thumbnail.clone().map(|t| format!("data:image/png;base64,{t}"));
+    let gif_src = item
+        .thumbnail_gif
+        .clone()
+        .map(|g| format!("data:image/gif;base64,{g}"));
+    let png_src = item
+        .thumbnail
+        .clone()
+        .map(|t| format!("data:image/png;base64,{t}"));
     let frame_count = item.frame_count;
 
     // Fetch detail (with frame_thumbnails) if animated

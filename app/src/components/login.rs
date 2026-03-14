@@ -101,10 +101,10 @@ fn init_google_signin(client_id: &str) {
     }
 
     // Load the Google Identity Services script
-    let script = document
-        .create_element("script")
+    let script = document.create_element("script").unwrap();
+    script
+        .set_attribute("src", "https://accounts.google.com/gsi/client")
         .unwrap();
-    script.set_attribute("src", "https://accounts.google.com/gsi/client").unwrap();
     script.set_attribute("async", "").unwrap();
 
     let client_id = client_id.to_string();
@@ -143,9 +143,19 @@ fn render_google_button(client_id: &str) {
 
     // Call google.accounts.id.initialize({client_id, callback})
     let init_opts = js_sys::Object::new();
-    let _ = js_sys::Reflect::set(&init_opts, &JsValue::from_str("client_id"), &JsValue::from_str(client_id));
-    let handle_credential = js_sys::Reflect::get(&window, &JsValue::from_str("handleGoogleCredential")).unwrap_or(JsValue::UNDEFINED);
-    let _ = js_sys::Reflect::set(&init_opts, &JsValue::from_str("callback"), &handle_credential);
+    let _ = js_sys::Reflect::set(
+        &init_opts,
+        &JsValue::from_str("client_id"),
+        &JsValue::from_str(client_id),
+    );
+    let handle_credential =
+        js_sys::Reflect::get(&window, &JsValue::from_str("handleGoogleCredential"))
+            .unwrap_or(JsValue::UNDEFINED);
+    let _ = js_sys::Reflect::set(
+        &init_opts,
+        &JsValue::from_str("callback"),
+        &handle_credential,
+    );
 
     if let Ok(initialize) = js_sys::Reflect::get(&id, &JsValue::from_str("initialize")) {
         if let Some(func) = initialize.dyn_ref::<js_sys::Function>() {
@@ -160,10 +170,26 @@ fn render_google_button(client_id: &str) {
     };
     if let Some(el) = document.get_element_by_id("google-signin-button") {
         let btn_opts = js_sys::Object::new();
-        let _ = js_sys::Reflect::set(&btn_opts, &JsValue::from_str("theme"), &JsValue::from_str("filled_black"));
-        let _ = js_sys::Reflect::set(&btn_opts, &JsValue::from_str("size"), &JsValue::from_str("large"));
-        let _ = js_sys::Reflect::set(&btn_opts, &JsValue::from_str("width"), &JsValue::from_f64(280.0));
-        let _ = js_sys::Reflect::set(&btn_opts, &JsValue::from_str("text"), &JsValue::from_str("signin_with"));
+        let _ = js_sys::Reflect::set(
+            &btn_opts,
+            &JsValue::from_str("theme"),
+            &JsValue::from_str("filled_black"),
+        );
+        let _ = js_sys::Reflect::set(
+            &btn_opts,
+            &JsValue::from_str("size"),
+            &JsValue::from_str("large"),
+        );
+        let _ = js_sys::Reflect::set(
+            &btn_opts,
+            &JsValue::from_str("width"),
+            &JsValue::from_f64(280.0),
+        );
+        let _ = js_sys::Reflect::set(
+            &btn_opts,
+            &JsValue::from_str("text"),
+            &JsValue::from_str("signin_with"),
+        );
 
         if let Ok(render_button) = js_sys::Reflect::get(&id, &JsValue::from_str("renderButton")) {
             if let Some(func) = render_button.dyn_ref::<js_sys::Function>() {

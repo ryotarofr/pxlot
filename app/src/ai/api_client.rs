@@ -97,9 +97,7 @@ pub struct ApiErrorDetail {
 const API_URL: &str = "/api/messages";
 
 /// Send a Messages API request via the backend proxy and return the parsed response.
-pub async fn send_message(
-    request: &MessagesRequest,
-) -> Result<MessagesResponse, String> {
+pub async fn send_message(request: &MessagesRequest) -> Result<MessagesResponse, String> {
     let body = serde_json::to_string(request).map_err(|e| format!("Serialize error: {e}"))?;
 
     let opts = web_sys::RequestInit::new();
@@ -116,8 +114,8 @@ pub async fn send_message(
         .map_err(|e| format!("Header error: {e:?}"))?;
     opts.set_headers(&headers);
 
-    let request =
-        web_sys::Request::new_with_str_and_init(API_URL, &opts).map_err(|e| format!("Request error: {e:?}"))?;
+    let request = web_sys::Request::new_with_str_and_init(API_URL, &opts)
+        .map_err(|e| format!("Request error: {e:?}"))?;
 
     let window = web_sys::window().ok_or("No window")?;
     let resp_val = JsFuture::from(window.fetch_with_request(&request))
@@ -139,7 +137,11 @@ pub async fn send_message(
     if !resp.ok() {
         // Try to parse API error
         if let Ok(api_err) = serde_json::from_str::<ApiError>(&text) {
-            return Err(format!("API error ({}): {}", resp.status(), api_err.error.message));
+            return Err(format!(
+                "API error ({}): {}",
+                resp.status(),
+                api_err.error.message
+            ));
         }
         return Err(format!("HTTP {}: {}", resp.status(), text));
     }
