@@ -114,6 +114,7 @@ pub fn CanvasView(
     editor: StoredValue<EditorState>,
     render_trigger: ReadSignal<u32>,
     set_color: WriteSignal<Color>,
+    set_dirty: WriteSignal<bool>,
 ) -> impl IntoView {
     let canvas_ref = NodeRef::<leptos::html::Canvas>::new();
     let drag_cmd = StoredValue::new(Option::<Command>::None);
@@ -715,6 +716,7 @@ pub fn CanvasView(
         editor.with_value(|state| {
             storage::autosave(&state.canvas, &state.history);
         });
+        set_dirty.set(true);
     };
 
     let on_mousemove = move |ev: MouseEvent| {
@@ -903,6 +905,7 @@ pub fn CanvasView(
         editor.with_value(|state| {
             storage::autosave(&state.canvas, &state.history);
         });
+        set_dirty.set(true);
     };
 
     let on_wheel = move |ev: WheelEvent| {

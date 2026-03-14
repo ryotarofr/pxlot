@@ -16,7 +16,7 @@ use crate::ai::tools;
 use crate::state::EditorState;
 
 /// Maximum operations to execute per frame.
-const MAX_OPS_PER_FRAME: usize = 40;
+const MAX_OPS_PER_FRAME: usize = 50;
 
 /// Maximum frames in an animation plan.
 const MAX_FRAMES: usize = 8;
@@ -44,33 +44,53 @@ FORMAT 2 — Animation (use when user asks for animation, movement, walking, idl
 
 "palette": declare 4-8 named colors before drawing. Every color used in operations MUST come from this palette.
 
-Tools:
+BASIC TOOLS:
 - draw_filled_rect: x0,y0,x1,y1,color — filled rectangle
 - draw_filled_ellipse: x0,y0,x1,y1,color — filled ellipse
+- draw_filled_circle: cx,cy,radius,color — filled circle (center + radius, easier than ellipse for round shapes)
 - draw_rect: x0,y0,x1,y1,color — rectangle outline
 - draw_ellipse: x0,y0,x1,y1,color — ellipse outline
-- draw_line: x0,y0,x1,y1,color — straight line
+- draw_line: x0,y0,x1,y1,color — straight line (1px)
+- draw_thick_line: x0,y0,x1,y1,color,thickness — thick line (2-8px, great for bold outlines)
 - flood_fill: x,y,color — fill contiguous region
-- set_pixels: pixels:[{{"x":int,"y":int,"color":"hex"}}] — ONLY for tiny details
+- set_pixels: pixels:[{{"x":int,"y":int,"color":"hex"}}] — batch pixel placement for details
 
-RULES:
+ADVANCED TOOLS:
+- fill_dithered: x0,y0,x1,y1,color1,color2,pattern — two-color dither fill for retro shading. pattern: "checker"|"h_stripes"|"v_stripes"|"diag_stripes"
+- gradient_fill: x0,y0,x1,y1,color1,color2,steps — stepped vertical gradient (top→bottom). steps=2-16 controls band count. Great for sky, water, metal.
+- draw_outline: color — auto-generate outline around ALL non-transparent pixels on active layer. Call ONCE after drawing all shapes. Very powerful for clean outlines.
+- replace_color: old_color,new_color — replace every pixel of old_color with new_color on active layer. Great for palette swaps and animation color effects.
+- set_blend_mode: mode — set active layer blend mode. "normal"|"multiply"|"screen"|"overlay". Use with add_layer for shadow/highlight layers (e.g. multiply layer for shadows, screen layer for glow).
+- flip_horizontal — mirror the active layer left↔right
+- flip_vertical — mirror the active layer top↔bottom
+- rotate_90 — rotate active layer 90° clockwise (square canvas only)
+
+DRAWING ORDER & TECHNIQUE:
 1. ALL coordinates MUST be in [0,{max}]. The canvas is exactly 64x64.
-2. Order: background fill → large body → shading → outlines → tiny details (set_pixels last).
-3. Use 2-3 shades for depth (base, shadow, highlight). Dark outlines (#1a1a2e) make shapes pop.
-4. set_pixels ONLY for accents (<10 pixels). Never for fills.
-5. Plan 10-25 operations per frame. Never use clear_canvas.
-6. Combine overlapping shapes for complex silhouettes (e.g. teardrop = large ellipse + small ellipse on top).
-7. For modifications: output only NEW operations to layer on top.
+2. Order: background fill → large body shapes → shading/highlights → details → draw_outline last.
+3. Use 2-3 shades per color for depth (base, shadow, highlight).
+4. Use fill_dithered for gradients, shadows, and retro textures (e.g. checker pattern for semi-transparent shadows).
+5. Use draw_outline ONCE at the end — it auto-generates clean outlines around all drawn shapes. This is much better than manually drawing outlines.
+6. Use draw_filled_circle for round elements (eyes, buttons, joints, particles).
+7. Use draw_thick_line for bold features and thick outlines.
+8. Use set_pixels freely for details, eyes, highlights, and small features.
+9. Use gradient_fill for skies, water, sunsets — set steps=3-6 for a banded pixel art look.
+10. For advanced shading: add_layer("shadow") → set_blend_mode("multiply") → draw dark shapes on that layer. Similarly add_layer("glow") → set_blend_mode("screen") for highlights.
+11. Plan 15-35 operations per frame for detailed art. Never use clear_canvas.
+12. Combine overlapping shapes for complex silhouettes.
+13. For modifications: output only NEW operations to layer on top.
 
 ANIMATION RULES (Format 2 only):
 - Each frame is a COMPLETE drawing (not a delta). Redraw everything per frame.
 - Keep character size, position, and palette consistent across frames.
 - Animate with small changes (1-3px shifts per frame) for smooth motion.
+- Use replace_color for flash/damage effects across frames.
 - Frame count: idle=2-3, walk=4, attack=3-4, bounce=3-4.
 - All frames share the SAME palette.
+- Use squash-and-stretch: slightly change proportions for lively motion (e.g. a jumping character gets taller at peak, wider on landing).
 
 EXAMPLE — red mushroom (single image):
-{{"description":"Red mushroom with white spots","palette":{{"bg":"#87ceeb","cap":"#cc2222","cap_dark":"#991111","stem":"#f5e6c8","stem_dark":"#d4c4a0","spot":"#ffffff","outline":"#1a1a2e"}},"operations":[{{"tool":"draw_filled_rect","x0":0,"y0":0,"x1":63,"y1":63,"color":"#87ceeb"}},{{"tool":"draw_filled_ellipse","x0":8,"y0":8,"x1":56,"y1":38,"color":"#cc2222"}},{{"tool":"draw_filled_ellipse","x0":10,"y0":14,"x1":34,"y1":36,"color":"#991111"}},{{"tool":"draw_filled_rect","x0":22,"y0":34,"x1":42,"y1":58,"color":"#f5e6c8"}},{{"tool":"draw_filled_rect","x0":24,"y0":34,"x1":40,"y1":40,"color":"#d4c4a0"}},{{"tool":"draw_filled_ellipse","x0":18,"y0":14,"x1":28,"y1":24,"color":"#ffffff"}},{{"tool":"draw_filled_ellipse","x0":36,"y0":18,"x1":44,"y1":26,"color":"#ffffff"}},{{"tool":"draw_ellipse","x0":8,"y0":8,"x1":56,"y1":38,"color":"#1a1a2e"}},{{"tool":"draw_rect","x0":22,"y0":34,"x1":42,"y1":58,"color":"#1a1a2e"}},{{"tool":"draw_line","x0":22,"y0":34,"x1":8,"y1":34,"color":"#1a1a2e"}},{{"tool":"draw_line","x0":42,"y0":34,"x1":56,"y1":34,"color":"#1a1a2e"}},{{"tool":"set_pixels","pixels":[{{"x":28,"y":46,"color":"#1a1a2e"}},{{"x":36,"y":46,"color":"#1a1a2e"}}]}}]}}"##
+{{"description":"Red mushroom with white spots","palette":{{"bg":"#87ceeb","cap":"#cc2222","cap_dark":"#991111","cap_mid":"#aa1a1a","stem":"#f5e6c8","stem_dark":"#d4c4a0","spot":"#ffffff","outline":"#1a1a2e"}},"operations":[{{"tool":"draw_filled_rect","x0":0,"y0":0,"x1":63,"y1":63,"color":"#87ceeb"}},{{"tool":"draw_filled_ellipse","x0":8,"y0":8,"x1":56,"y1":38,"color":"#cc2222"}},{{"tool":"fill_dithered","x0":10,"y0":20,"x1":34,"y1":36,"color1":"#cc2222","color2":"#991111","pattern":"checker"}},{{"tool":"draw_filled_rect","x0":22,"y0":34,"x1":42,"y1":58,"color":"#f5e6c8"}},{{"tool":"fill_dithered","x0":24,"y0":34,"x1":40,"y1":40,"color1":"#f5e6c8","color2":"#d4c4a0","pattern":"h_stripes"}},{{"tool":"draw_filled_circle","cx":23,"cy":19,"radius":5,"color":"#ffffff"}},{{"tool":"draw_filled_circle","cx":40,"cy":22,"radius":4,"color":"#ffffff"}},{{"tool":"draw_filled_circle","cx":32,"cy":13,"radius":3,"color":"#ffffff"}},{{"tool":"set_pixels","pixels":[{{"x":28,"y":46,"color":"#1a1a2e"}},{{"x":36,"y":46,"color":"#1a1a2e"}},{{"x":30,"y":50,"color":"#1a1a2e"}},{{"x":34,"y":50,"color":"#1a1a2e"}}]}},{{"tool":"draw_outline","color":"#1a1a2e"}}]}}"##
     )
 }
 
@@ -463,6 +483,14 @@ fn offset_coordinates(op: &Value, dx: i64, dy: i64) -> Value {
     }
     if let Some(y) = op.get("y").and_then(|v| v.as_i64()) {
         out["y"] = json!(clamp_and_offset(y, dy));
+    }
+
+    // Circle center (draw_filled_circle)
+    if let Some(cx) = op.get("cx").and_then(|v| v.as_i64()) {
+        out["cx"] = json!(clamp_and_offset(cx, dx));
+    }
+    if let Some(cy) = op.get("cy").and_then(|v| v.as_i64()) {
+        out["cy"] = json!(clamp_and_offset(cy, dy));
     }
 
     // set_pixels — clamp and offset each pixel

@@ -91,6 +91,13 @@ body {
     background: var(--accent-dim);
 }
 
+.menu-separator {
+    color: var(--text-secondary);
+    font-size: 10px;
+    margin: 0 2px;
+    user-select: none;
+}
+
 .png-scale-select {
     height: 24px;
     background: var(--bg-input);
@@ -376,6 +383,19 @@ body {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+.layer-blend-mode {
+    width: 40px;
+    height: 18px;
+    font-size: 10px;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    cursor: pointer;
+    flex-shrink: 0;
+    padding: 0 1px;
 }
 
 .layer-opacity {

@@ -119,6 +119,9 @@ impl PixelBuffer {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BlendMode {
     Normal,
+    Multiply,
+    Screen,
+    Overlay,
 }
 
 /// A single layer in the canvas.
@@ -145,9 +148,26 @@ impl Layer {
     }
 }
 
-/// Alpha-composite a source pixel (with layer opacity) onto a destination RGBA slice.
+/// Apply a blend mode to compute the blended channel value.
 #[inline]
-fn blend_pixel(dst: &mut [u8], src: &Color, layer_opacity: f64) {
+fn apply_blend_mode(src: f64, dst: f64, mode: BlendMode) -> f64 {
+    match mode {
+        BlendMode::Normal => src,
+        BlendMode::Multiply => src * dst,
+        BlendMode::Screen => 1.0 - (1.0 - src) * (1.0 - dst),
+        BlendMode::Overlay => {
+            if dst < 0.5 {
+                2.0 * src * dst
+            } else {
+                1.0 - 2.0 * (1.0 - src) * (1.0 - dst)
+            }
+        }
+    }
+}
+
+/// Alpha-composite a source pixel (with layer opacity and blend mode) onto a destination RGBA slice.
+#[inline]
+fn blend_pixel(dst: &mut [u8], src: &Color, layer_opacity: f64, mode: BlendMode) {
     if src.a == 0 {
         return;
     }
@@ -161,11 +181,17 @@ fn blend_pixel(dst: &mut [u8], src: &Color, layer_opacity: f64) {
         src.g as f64 / 255.0,
         src.b as f64 / 255.0,
     );
+
+    // Apply blend mode to get the blended color (only affects RGB, not alpha)
+    let br = apply_blend_mode(sr, dr, mode);
+    let bg = apply_blend_mode(sg, dg, mode);
+    let bb = apply_blend_mode(sb, db, mode);
+
     let out_a = sa + da * (1.0 - sa);
     if out_a > 0.0 {
-        dst[0] = ((sr * sa + dr * da * (1.0 - sa)) / out_a * 255.0 + 0.5) as u8;
-        dst[1] = ((sg * sa + dg * da * (1.0 - sa)) / out_a * 255.0 + 0.5) as u8;
-        dst[2] = ((sb * sa + db * da * (1.0 - sa)) / out_a * 255.0 + 0.5) as u8;
+        dst[0] = ((br * sa + dr * da * (1.0 - sa)) / out_a * 255.0 + 0.5) as u8;
+        dst[1] = ((bg * sa + dg * da * (1.0 - sa)) / out_a * 255.0 + 0.5) as u8;
+        dst[2] = ((bb * sa + db * da * (1.0 - sa)) / out_a * 255.0 + 0.5) as u8;
         dst[3] = (out_a * 255.0 + 0.5) as u8;
     }
 }
@@ -247,6 +273,16 @@ impl Canvas {
 
     pub fn active_layer_mut(&mut self) -> Option<&mut Layer> {
         self.layers.get_mut(self.active_layer)
+    }
+
+    /// Set the blend mode for a layer by index.
+    pub fn set_layer_blend_mode(&mut self, index: usize, mode: BlendMode) -> bool {
+        if let Some(layer) = self.layers.get_mut(index) {
+            layer.blend_mode = mode;
+            true
+        } else {
+            false
+        }
     }
 
     pub fn active_layer_ref(&self) -> Option<&Layer> {
@@ -345,9 +381,10 @@ impl Canvas {
                 continue;
             }
             let layer_opacity = layer.opacity as f64 / 255.0;
+            let mode = layer.blend_mode;
             for i in 0..size {
                 let src = &layer.buffer.pixels[i];
-                blend_pixel(&mut result[i * 4..i * 4 + 4], src, layer_opacity);
+                blend_pixel(&mut result[i * 4..i * 4 + 4], src, layer_opacity, mode);
             }
         }
         result
@@ -370,6 +407,7 @@ impl Canvas {
                 continue;
             }
             let layer_opacity = layer.opacity as f64 / 255.0;
+            let mode = layer.blend_mode;
             let bw = self.width as usize;
             for ry in 0..rh {
                 let by = ry0 as usize + ry;
@@ -378,7 +416,7 @@ impl Canvas {
                     let buf_i = by * bw + bx;
                     let src = &layer.buffer.pixels[buf_i];
                     let di = (ry * rw + rx) * 4;
-                    blend_pixel(&mut result[di..di + 4], src, layer_opacity);
+                    blend_pixel(&mut result[di..di + 4], src, layer_opacity, mode);
                 }
             }
         }
@@ -406,6 +444,7 @@ impl Canvas {
                 continue;
             }
             let layer_opacity = layer.opacity as f64 / 255.0;
+            let mode = layer.blend_mode;
             for fy in 0..fh {
                 for fx in 0..fw {
                     let bx = fx + fx0;
@@ -413,7 +452,7 @@ impl Canvas {
                     let buf_i = (by * bw + bx) as usize;
                     let src = &layer.buffer.pixels[buf_i];
                     let di = (fy * fw + fx) as usize * 4;
-                    blend_pixel(&mut result[di..di + 4], src, layer_opacity);
+                    blend_pixel(&mut result[di..di + 4], src, layer_opacity, mode);
                 }
             }
         }

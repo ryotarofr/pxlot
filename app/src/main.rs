@@ -23,6 +23,7 @@ use components::timeline::TimelinePanel;
 use components::tool_panel::ToolPanel;
 use i18n::{Lang, t};
 use pxlot_core::Color;
+use pxlot_core::history::Command;
 use pxlot_core::image_processing::{self, DitherMethod, DownsampleMethod}; // DownsampleMethod used internally
 use pxlot_formats::{gif_format, png_format};
 use pxlot_tools::{ToolKind, apply_redo, apply_undo};
@@ -175,6 +176,10 @@ fn Root() -> impl IntoView {
     });
 
     let on_back_to_projects = Callback::new(move |_: ()| {
+        // Clear beforeunload handler so the alert doesn't fire on the project list screen
+        if let Some(window) = web_sys::window() {
+            window.set_onbeforeunload(None);
+        }
         set_url_project_id(None);
         set_screen.set(AppScreen::Projects);
     });
@@ -259,6 +264,7 @@ fn App(
         visible: true,
         locked: false,
         opacity: 255,
+        blend_mode: pxlot_core::BlendMode::Normal,
     }]);
     let (active_layer, set_active_layer) = signal(0usize);
 
@@ -374,6 +380,10 @@ fn App(
     // Public toggle
     let (is_public, set_is_public) = signal(false);
 
+    // Unsaved changes tracking
+    let (dirty, set_dirty) = signal(false);
+    let (show_unsaved_warning, set_show_unsaved_warning) = signal(false);
+
     // Load project from server if an ID was provided
     if let Some(id) = initial_project_id {
         leptos::task::spawn_local(async move {
@@ -430,6 +440,7 @@ fn App(
                         visible: l.visible,
                         locked: l.locked,
                         opacity: l.opacity,
+                        blend_mode: l.blend_mode,
                     })
                     .collect(),
             );
@@ -454,6 +465,7 @@ fn App(
     let trigger_render = move || {
         set_render_trigger.update(|v| *v += 1);
         sync_state();
+        set_dirty.set(true);
         // Auto-save
         editor.with_value(|state| {
             storage::autosave(&state.canvas, &state.history);
@@ -464,6 +476,21 @@ fn App(
     Effect::new(move |_| {
         let _ = render_trigger.get(); // subscribe to changes
         sync_state();
+    });
+
+    // Warn on browser tab close if unsaved changes
+    Effect::new(move |_| {
+        let is_dirty = dirty.get();
+        let window = web_sys::window().unwrap();
+        if is_dirty {
+            let cb = Closure::wrap(Box::new(move |ev: web_sys::BeforeUnloadEvent| {
+                ev.prevent_default();
+            }) as Box<dyn FnMut(_)>);
+            window.set_onbeforeunload(Some(cb.as_ref().unchecked_ref()));
+            cb.forget();
+        } else {
+            window.set_onbeforeunload(None);
+        }
     });
 
     // Sync tool/color changes to editor state
@@ -653,6 +680,7 @@ fn App(
                 Ok(meta) => {
                     set_url_project_id(Some(&meta.id));
                     set_current_project_id.set(Some(meta.id));
+                    set_dirty.set(false);
                     log::info!("Project '{}' saved to server", meta.name);
                 }
                 Err(e) => {
@@ -821,6 +849,61 @@ fn App(
         });
         trigger_render();
     });
+
+    let on_layer_blend_mode = Callback::new(move |args: (usize, pxlot_core::BlendMode)| {
+        let (idx, mode) = args;
+        editor.update_value(|state| {
+            state.canvas.set_layer_blend_mode(idx, mode);
+        });
+        trigger_render();
+    });
+
+    // ── Transform operations ────────────────────────────────
+
+    let on_flip_horizontal = move || {
+        editor.update_value(|state| {
+            let mut cmd = Command::new("flip_horizontal");
+            pxlot_tools::flip_horizontal(&mut state.canvas, &mut cmd);
+            if !cmd.is_empty() {
+                state.history.push(cmd);
+            }
+        });
+        trigger_render();
+    };
+
+    let on_flip_vertical = move || {
+        editor.update_value(|state| {
+            let mut cmd = Command::new("flip_vertical");
+            pxlot_tools::flip_vertical(&mut state.canvas, &mut cmd);
+            if !cmd.is_empty() {
+                state.history.push(cmd);
+            }
+        });
+        trigger_render();
+    };
+
+    let on_rotate_90 = move || {
+        editor.update_value(|state| {
+            let mut cmd = Command::new("rotate_90");
+            pxlot_tools::rotate_90(&mut state.canvas, &mut cmd);
+            if !cmd.is_empty() {
+                state.history.push(cmd);
+            }
+        });
+        trigger_render();
+    };
+
+    let on_auto_outline = move || {
+        let color = current_color.get();
+        editor.update_value(|state| {
+            let mut cmd = Command::new("auto_outline");
+            pxlot_tools::draw_outline(&mut state.canvas, color, &mut cmd);
+            if !cmd.is_empty() {
+                state.history.push(cmd);
+            }
+        });
+        trigger_render();
+    };
 
     // Sprite sheet export handler
     let do_export_spritesheet = move || {
@@ -1216,6 +1299,10 @@ fn App(
                 });
                 trigger_render();
             }
+            "H" if !ctrl && shift => on_flip_horizontal(),
+            "V" if !ctrl && shift => on_flip_vertical(),
+            "T" if !ctrl && shift => on_rotate_90(),
+            "Q" if !ctrl && shift => on_auto_outline(),
             _ => {}
         }
     };
@@ -1313,6 +1400,19 @@ fn App(
                     <button class="menu-btn" on:click=move |_| on_redo() title="Redo (Ctrl+Shift+Z)">
                         {move || t(lang.get(), "redo")}
                     </button>
+                    <span class="menu-separator">"|"</span>
+                    <button class="menu-btn" on:click=move |_| on_flip_horizontal() title="Flip Horizontal (Shift+H)">
+                        "\u{2194}"
+                    </button>
+                    <button class="menu-btn" on:click=move |_| on_flip_vertical() title="Flip Vertical (Shift+V)">
+                        "\u{2195}"
+                    </button>
+                    <button class="menu-btn" on:click=move |_| on_rotate_90() title="Rotate 90° CW (Shift+T)">
+                        "\u{21bb}"
+                    </button>
+                    <button class="menu-btn" on:click=move |_| on_auto_outline() title="Auto Outline (Shift+Q, uses current color)">
+                        "\u{25ef}"
+                    </button>
                     <label class="menu-checkbox">
                         <input
                             type="checkbox"
@@ -1368,7 +1468,13 @@ fn App(
                     </button>
                     <button
                         class="menu-btn"
-                        on:click=move |_| on_back.run(())
+                        on:click=move |_| {
+                            if dirty.get() {
+                                set_show_unsaved_warning.set(true);
+                            } else {
+                                on_back.run(());
+                            }
+                        }
                         title="Back to Projects"
                     >
                         "Projects"
@@ -1395,7 +1501,7 @@ fn App(
                     token_usage=ai_token_usage
                 />
                 <div class="canvas-area">
-                    <CanvasView editor=editor render_trigger=render_trigger set_color=set_current_color />
+                    <CanvasView editor=editor render_trigger=render_trigger set_color=set_current_color set_dirty=set_dirty />
                 </div>
                 <aside class="right-panel">
                     <LayerPanel
@@ -1408,6 +1514,7 @@ fn App(
                         on_opacity_change=on_layer_opacity
                         on_move_up=on_layer_move_up
                         on_move_down=on_layer_move_down
+                        on_blend_mode_change=on_layer_blend_mode
                     />
                     <ColorPicker
                         current_color=current_color
@@ -1441,6 +1548,37 @@ fn App(
                 on_toggle_onion_skin=on_toggle_onion_skin
                 on_onion_skin_frames_change=on_onion_skin_frames_change
             />
+            // Unsaved Changes Warning
+            {move || {
+                if show_unsaved_warning.get() {
+                    Some(view! {
+                        <div class="modal-overlay" on:click=move |_| set_show_unsaved_warning.set(false)>
+                            <div class="modal-dialog modal-delete-confirm" on:click=move |ev: web_sys::MouseEvent| ev.stop_propagation()>
+                                <h3>"Unsaved Changes"</h3>
+                                <p class="modal-delete-msg">"You have unsaved changes. What would you like to do?"</p>
+                                <div class="modal-actions">
+                                    <button class="menu-btn" on:click=move |_| {
+                                        set_show_unsaved_warning.set(false);
+                                    }>"Cancel"</button>
+                                    <button class="menu-btn" on:click=move |_| {
+                                        set_show_unsaved_warning.set(false);
+                                        set_dirty.set(false);
+                                        on_back.run(());
+                                    }>"Discard"</button>
+                                    <button class="menu-btn" style="color: var(--accent);" on:click=move |_| {
+                                        set_show_unsaved_warning.set(false);
+                                        do_save_project();
+                                        on_back.run(());
+                                    }>"Save & Exit"</button>
+                                </div>
+                            </div>
+                        </div>
+                    })
+                } else {
+                    None
+                }
+            }}
+
             // New Canvas Dialog
             {move || {
                 if show_new_dialog.get() {
