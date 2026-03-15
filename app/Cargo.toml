@@ -55,6 +55,7 @@ web-sys = { workspace = true, features = [
     "AddEventListenerOptions",
 ] }
 base64 = "0.22"
+png = "0.17"
 js-sys = { workspace = true }
 log = { workspace = true }
 console_log = { workspace = true }

@@ -19,6 +19,7 @@ const ANTHROPIC_VERSION: &str = "2023-06-01";
 
 pub struct AppState {
     api_key: String,
+    replicate_api_token: Option<String>,
     client: Client,
     pool: PgPool,
     jwt_secret: String,
@@ -33,6 +34,7 @@ async fn main() {
     let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
     let jwt_secret = std::env::var("JWT_SECRET").expect("JWT_SECRET must be set");
     let google_client_id = std::env::var("GOOGLE_CLIENT_ID").expect("GOOGLE_CLIENT_ID must be set");
+    let replicate_api_token = std::env::var("REPLICATE_API_TOKEN").ok();
 
     // Connect to PostgreSQL
     let pool = PgPool::connect(&database_url)
@@ -44,6 +46,7 @@ async fn main() {
 
     let state = Arc::new(AppState {
         api_key,
+        replicate_api_token,
         client: Client::new(),
         pool,
         jwt_secret,
@@ -60,6 +63,7 @@ async fn main() {
     let app = Router::new()
         // AI proxy
         .route("/api/messages", post(proxy_messages))
+        .route("/api/generate-image", post(routes::generate_image))
         // Auth
         .route("/api/auth/google", post(routes::google_auth))
         .route("/api/auth/me", get(routes::me))

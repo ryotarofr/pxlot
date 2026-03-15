@@ -112,6 +112,12 @@ pub async fn send_message(request: &MessagesRequest) -> Result<MessagesResponse,
     headers
         .set("Content-Type", "application/json")
         .map_err(|e| format!("Header error: {e:?}"))?;
+    // Attach JWT auth token for the backend proxy
+    if let Some(token) = crate::auth::load_token() {
+        headers
+            .set("Authorization", &format!("Bearer {token}"))
+            .map_err(|e| format!("Auth header error: {e:?}"))?;
+    }
     opts.set_headers(&headers);
 
     let request = web_sys::Request::new_with_str_and_init(API_URL, &opts)

@@ -1144,6 +1144,7 @@ body {
 
 .ai-model-select {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 4px;
     padding: 0 8px 4px;
@@ -1151,6 +1152,7 @@ body {
 
 .ai-model-select .ai-select {
     flex: 1;
+    min-width: 80px;
     height: 20px;
     font-size: 10px;
 }

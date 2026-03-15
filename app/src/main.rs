@@ -291,6 +291,8 @@ fn App(
     let (ai_model, set_ai_model) = signal("claude-sonnet-4-6".to_string());
     let (ai_token_usage, set_ai_token_usage) = signal((0usize, 0usize));
     let (chat_open, set_chat_open) = signal(false);
+    // Generation mode: "ai_draw" (LLM drawing ops) or "image_gen" (Replicate image generation)
+    let (gen_mode, set_gen_mode) = signal("ai_draw".to_string());
     let ai_stop_flag = ai::agent::new_stop_flag();
     let ai_conversation = StoredValue::new(Vec::<ai::api_client::ApiMessage>::new());
 
@@ -307,22 +309,34 @@ fn App(
             msgs.push(ai::ChatMessage::user(&text));
         });
 
+        let mode = gen_mode.get();
         let model = ai_model.get();
         let stop = stop_flag_for_send.clone();
         stop.store(false, std::sync::atomic::Ordering::Relaxed);
 
-        // Spawn the async agent loop
-        wasm_bindgen_futures::spawn_local(ai::agent::run_agent(
-            text,
-            model,
-            editor,
-            ai_conversation,
-            set_chat_messages,
-            set_ai_running,
-            set_ai_token_usage,
-            set_render_trigger,
-            stop,
-        ));
+        if mode == "image_gen" {
+            // Image generation via Replicate
+            wasm_bindgen_futures::spawn_local(ai::image_gen::run_image_generation(
+                text,
+                editor,
+                set_chat_messages,
+                set_ai_running,
+                set_render_trigger,
+            ));
+        } else {
+            // AI drawing via LLM
+            wasm_bindgen_futures::spawn_local(ai::agent::run_agent(
+                text,
+                model,
+                editor,
+                ai_conversation,
+                set_chat_messages,
+                set_ai_running,
+                set_ai_token_usage,
+                set_render_trigger,
+                stop,
+            ));
+        }
     });
 
     let stop_flag_for_stop = ai_stop_flag.clone();
@@ -338,6 +352,10 @@ fn App(
 
     let on_chat_model_change = Callback::new(move |model: String| {
         set_ai_model.set(model);
+    });
+
+    let on_gen_mode_change = Callback::new(move |mode: String| {
+        set_gen_mode.set(mode);
     });
 
     let on_toggle_chat = Callback::new(move |_: ()| {
@@ -1499,6 +1517,8 @@ fn App(
                     on_model_change=on_chat_model_change
                     model=ai_model
                     token_usage=ai_token_usage
+                    gen_mode=gen_mode
+                    on_gen_mode_change=on_gen_mode_change
                 />
                 <div class="canvas-area">
                     <CanvasView editor=editor render_trigger=render_trigger set_color=set_current_color set_dirty=set_dirty />

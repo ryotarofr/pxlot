@@ -30,6 +30,10 @@ pub fn AiChat(
     model: ReadSignal<String>,
     /// Token usage display.
     token_usage: ReadSignal<(usize, usize)>,
+    /// Generation mode: "ai_draw" or "image_gen".
+    gen_mode: ReadSignal<String>,
+    /// Change generation mode.
+    on_gen_mode_change: Callback<String>,
 ) -> impl IntoView {
     let (input_text, set_input_text) = signal(String::new());
     let (panel_width, set_panel_width) = signal(DEFAULT_WIDTH);
@@ -137,25 +141,57 @@ pub fn AiChat(
                 </div>
             </div>
 
-            // Model selector
+            // Mode selector
             <div class="ai-model-select">
                 <select
                     class="ai-select"
-                    on:change=move |ev| on_model_change.run(event_target_value(&ev))
+                    on:change=move |ev| on_gen_mode_change.run(event_target_value(&ev))
                 >
                     <option
-                        value="claude-sonnet-4-6"
-                        selected=move || model.get() == "claude-sonnet-4-6"
+                        value="ai_draw"
+                        selected=move || gen_mode.get() == "ai_draw"
                     >
-                        "Sonnet 4.6"
+                        "AI Draw"
                     </option>
                     <option
-                        value="claude-haiku-4-5-20251001"
-                        selected=move || model.get() == "claude-haiku-4-5-20251001"
+                        value="image_gen"
+                        selected=move || gen_mode.get() == "image_gen"
                     >
-                        "Haiku 4.5"
+                        "Image Gen"
                     </option>
                 </select>
+                // Model selector (only shown for AI Draw mode)
+                {move || {
+                    if gen_mode.get() == "ai_draw" {
+                        view! {
+                            <select
+                                class="ai-select"
+                                on:change=move |ev| on_model_change.run(event_target_value(&ev))
+                            >
+                                <option
+                                    value="claude-opus-4-6"
+                                    selected=move || model.get() == "claude-opus-4-6"
+                                >
+                                    "Opus 4.6"
+                                </option>
+                                <option
+                                    value="claude-sonnet-4-6"
+                                    selected=move || model.get() == "claude-sonnet-4-6"
+                                >
+                                    "Sonnet 4.6"
+                                </option>
+                                <option
+                                    value="claude-haiku-4-5-20251001"
+                                    selected=move || model.get() == "claude-haiku-4-5-20251001"
+                                >
+                                    "Haiku 4.5"
+                                </option>
+                            </select>
+                        }.into_any()
+                    } else {
+                        view! { <span></span> }.into_any()
+                    }
+                }}
                 <span class="ai-token-usage">
                     {move || {
                         let (inp, out) = token_usage.get();

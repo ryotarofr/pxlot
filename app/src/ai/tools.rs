@@ -288,6 +288,54 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
             }),
         },
         ToolDefinition {
+            name: "draw_filled_polygon".into(),
+            description: "Draw a filled polygon from a list of vertices. Great for complex silhouettes, roofs, mountains, crystals.".into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "vertices": {
+                        "type": "array",
+                        "description": "Array of {x, y} vertex points forming the polygon",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "x": { "type": "integer" },
+                                "y": { "type": "integer" }
+                            },
+                            "required": ["x", "y"]
+                        }
+                    },
+                    "color": { "type": "string", "description": "Fill hex color" }
+                },
+                "required": ["vertices", "color"]
+            }),
+        },
+        ToolDefinition {
+            name: "spray_pixels".into(),
+            description: "Scatter random pixels in a rectangle for textures (stars, grass, dirt, noise, particles).".into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "x0": { "type": "integer" },
+                    "y0": { "type": "integer" },
+                    "x1": { "type": "integer" },
+                    "y1": { "type": "integer" },
+                    "color": { "type": "string", "description": "Hex color" },
+                    "density": { "type": "integer", "description": "Percentage 1-100 (e.g. 10 = sparse stars, 50 = dense texture)" }
+                },
+                "required": ["x0", "y0", "x1", "y1", "color", "density"]
+            }),
+        },
+        ToolDefinition {
+            name: "copy_prev_frame".into(),
+            description: "Copy the previous frame's content to the current frame. Use this at the start of each animation frame (except frame 0) to maintain consistency, then modify only what changes.".into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {},
+                "required": []
+            }),
+        },
+        ToolDefinition {
             name: "finish".into(),
             description: "Call this when you are done drawing. This ends the agent loop.".into(),
             input_schema: json!({
@@ -335,6 +383,8 @@ pub fn execute_tool(
         "flip_horizontal" => exec_flip_horizontal(canvas, cmd),
         "flip_vertical" => exec_flip_vertical(canvas, cmd),
         "rotate_90" => exec_rotate_90(canvas, cmd),
+        "draw_filled_polygon" => exec_filled_polygon(input, canvas, cmd),
+        "spray_pixels" => exec_spray_pixels(input, canvas, cmd),
         "flood_fill" => exec_flood_fill(input, canvas, cmd),
         "get_canvas_info" => exec_get_canvas_info(canvas),
         "clear_canvas" => exec_clear_canvas(canvas, cmd),
@@ -686,6 +736,52 @@ fn exec_rotate_90(canvas: &mut Canvas, cmd: &mut Command) -> ToolExecResult {
     } else {
         err("rotate_90 failed (canvas must be square)")
     }
+}
+
+fn exec_filled_polygon(input: &Value, canvas: &mut Canvas, cmd: &mut Command) -> ToolExecResult {
+    let Some(verts) = input.get("vertices").and_then(|v| v.as_array()) else {
+        return err("Missing 'vertices' array");
+    };
+    let hex = input.get("color").and_then(|v| v.as_str()).unwrap_or("#ffffff");
+    let color = match parse_color(hex) {
+        Ok(c) => c,
+        Err(e) => return err(e),
+    };
+    let vertices: Vec<(i32, i32)> = verts
+        .iter()
+        .filter_map(|v| {
+            let x = v.get("x").and_then(|x| x.as_i64())? as i32;
+            let y = v.get("y").and_then(|y| y.as_i64())? as i32;
+            // Convert frame coords to buffer coords
+            Some((canvas.to_buf_x(x), canvas.to_buf_y(y)))
+        })
+        .collect();
+    if vertices.len() < 3 {
+        return err("Need at least 3 vertices");
+    }
+    pxlot_tools::draw_filled_polygon(canvas, &vertices, color, cmd);
+    ok("draw_filled_polygon OK")
+}
+
+fn exec_spray_pixels(input: &Value, canvas: &mut Canvas, cmd: &mut Command) -> ToolExecResult {
+    let x0 = input.get("x0").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+    let y0 = input.get("y0").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+    let x1 = input.get("x1").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+    let y1 = input.get("y1").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+    let hex = input.get("color").and_then(|v| v.as_str()).unwrap_or("#ffffff");
+    let density = input.get("density").and_then(|v| v.as_u64()).unwrap_or(20) as u32;
+    let color = match parse_color(hex) {
+        Ok(c) => c,
+        Err(e) => return err(e),
+    };
+    let bx0 = canvas.to_buf_x(x0);
+    let by0 = canvas.to_buf_y(y0);
+    let bx1 = canvas.to_buf_x(x1);
+    let by1 = canvas.to_buf_y(y1);
+    // Use coordinates as seed for deterministic results
+    let seed = (x0.wrapping_mul(31) ^ y0.wrapping_mul(17) ^ x1.wrapping_mul(13) ^ y1.wrapping_mul(7)) as u32;
+    pxlot_tools::spray_pixels(canvas, bx0, by0, bx1, by1, color, density, seed, cmd);
+    ok("spray_pixels OK")
 }
 
 fn exec_finish(input: &Value) -> ToolExecResult {

@@ -2011,6 +2011,7 @@ dependencies = [
  "js-sys",
  "leptos",
  "log",
+ "png",
  "pxlot-animation",
  "pxlot-core",
  "pxlot-formats",
@@ -2057,6 +2058,7 @@ name = "pxlot-server"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "base64",
  "chrono",
  "dotenvy",
  "jsonwebtoken",

@@ -339,6 +339,181 @@ pub async fn get_gallery_detail(
     }
 }
 
+// ── Image generation (Replicate API) ─────────────────────────
+
+#[derive(Deserialize)]
+pub struct GenerateImageRequest {
+    pub prompt: String,
+    /// Replicate model ID (e.g. "retro-diffusion/rd-plus")
+    #[serde(default = "default_replicate_model")]
+    pub model: String,
+    #[serde(default = "default_image_width")]
+    pub width: u32,
+    #[serde(default = "default_image_height")]
+    pub height: u32,
+}
+
+fn default_replicate_model() -> String {
+    "retro-diffusion/rd-plus".to_string()
+}
+fn default_image_width() -> u32 {
+    256
+}
+fn default_image_height() -> u32 {
+    256
+}
+
+/// POST /api/generate-image — generate pixel art via Replicate API
+pub async fn generate_image(
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+    Json(req): Json<GenerateImageRequest>,
+) -> impl IntoResponse {
+    // Authenticate
+    let _user_id = match authenticate(&state, &headers) {
+        Ok(id) => id,
+        Err(resp) => return resp,
+    };
+
+    // Check Replicate token
+    let replicate_token = match &state.replicate_api_token {
+        Some(t) => t,
+        None => {
+            return err_response(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "REPLICATE_API_TOKEN not configured on server",
+            );
+        }
+    };
+
+    // Build Replicate prediction request
+    let replicate_body = serde_json::json!({
+        "input": {
+            "prompt": req.prompt,
+            "width": req.width,
+            "height": req.height,
+        }
+    });
+
+    let replicate_url = format!(
+        "https://api.replicate.com/v1/models/{}/predictions",
+        req.model
+    );
+
+    // Call Replicate API with synchronous wait (Prefer: wait)
+    let resp = state
+        .client
+        .post(&replicate_url)
+        .header("Authorization", format!("Bearer {replicate_token}"))
+        .header("Content-Type", "application/json")
+        .header("Prefer", "wait")
+        .json(&replicate_body)
+        .send()
+        .await;
+
+    let resp = match resp {
+        Ok(r) => r,
+        Err(e) => {
+            return err_response(
+                StatusCode::BAD_GATEWAY,
+                &format!("Replicate API error: {e}"),
+            );
+        }
+    };
+
+    let status = resp.status();
+    let body = resp.text().await.unwrap_or_default();
+
+    if !status.is_success() {
+        return err_response(
+            StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::BAD_GATEWAY),
+            &format!("Replicate error: {body}"),
+        );
+    }
+
+    // Parse Replicate response to extract output image URL
+    let prediction: serde_json::Value = match serde_json::from_str(&body) {
+        Ok(v) => v,
+        Err(e) => {
+            return err_response(
+                StatusCode::BAD_GATEWAY,
+                &format!("Failed to parse Replicate response: {e}"),
+            );
+        }
+    };
+
+    // Check prediction status
+    let pred_status = prediction
+        .get("status")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    if pred_status != "succeeded" {
+        let error_msg = prediction
+            .get("error")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Unknown error");
+        return err_response(
+            StatusCode::BAD_GATEWAY,
+            &format!("Replicate prediction failed ({}): {}", pred_status, error_msg),
+        );
+    }
+
+    // Extract output — can be a string URL or an array of URLs
+    let image_url = prediction
+        .get("output")
+        .and_then(|v| {
+            if let Some(url) = v.as_str() {
+                Some(url.to_string())
+            } else if let Some(arr) = v.as_array() {
+                arr.first().and_then(|u| u.as_str()).map(|s| s.to_string())
+            } else {
+                None
+            }
+        });
+
+    let image_url = match image_url {
+        Some(url) => url,
+        None => {
+            return err_response(
+                StatusCode::BAD_GATEWAY,
+                "No output image in Replicate response",
+            );
+        }
+    };
+
+    // Download the image and return it as base64
+    let img_resp = state.client.get(&image_url).send().await;
+    let img_bytes = match img_resp {
+        Ok(r) if r.status().is_success() => r.bytes().await.unwrap_or_default(),
+        Ok(r) => {
+            return err_response(
+                StatusCode::BAD_GATEWAY,
+                &format!("Failed to download image: HTTP {}", r.status()),
+            );
+        }
+        Err(e) => {
+            return err_response(
+                StatusCode::BAD_GATEWAY,
+                &format!("Failed to download image: {e}"),
+            );
+        }
+    };
+
+    use base64::Engine;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&img_bytes);
+
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "image_base64": b64,
+            "width": req.width,
+            "height": req.height,
+        })),
+    )
+        .into_response()
+}
+
 // ── Helpers ──────────────────────────────────────────────────
 
 /// Authenticate request via Bearer token, return user_id or error response.

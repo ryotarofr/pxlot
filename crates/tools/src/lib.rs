@@ -792,6 +792,94 @@ pub fn rotate_90(canvas: &mut Canvas, cmd: &mut Command) -> bool {
     true
 }
 
+// ── Filled polygon ───────────────────────────────────────────
+
+/// Draw a filled polygon given a list of vertices.
+/// Uses scanline fill algorithm.
+pub fn draw_filled_polygon(
+    canvas: &mut Canvas,
+    vertices: &[(i32, i32)],
+    color: Color,
+    cmd: &mut Command,
+) {
+    if vertices.len() < 3 {
+        return;
+    }
+    // Find bounding box
+    let min_y = vertices.iter().map(|v| v.1).min().unwrap();
+    let max_y = vertices.iter().map(|v| v.1).max().unwrap();
+
+    for y in min_y..=max_y {
+        // Build list of x intersections with edges
+        let mut nodes: Vec<i32> = Vec::new();
+        let n = vertices.len();
+        for i in 0..n {
+            let j = (i + 1) % n;
+            let (x0, y0) = vertices[i];
+            let (x1, y1) = vertices[j];
+            if (y0 <= y && y1 > y) || (y1 <= y && y0 > y) {
+                let x = x0 + ((y - y0) as i64 * (x1 - x0) as i64 / (y1 - y0) as i64) as i32;
+                nodes.push(x);
+            }
+        }
+        nodes.sort();
+        // Fill between pairs
+        for pair in nodes.chunks(2) {
+            if pair.len() == 2 {
+                for x in pair[0]..=pair[1] {
+                    if x >= 0 && y >= 0 {
+                        pencil_pixel(canvas, x as u32, y as u32, color, cmd);
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── Spray / scatter ──────────────────────────────────────────
+
+/// Scatter random pixels within a rectangular region.
+/// `density` is a percentage (1-100) controlling how many pixels are placed.
+/// Uses a deterministic seed based on coordinates for reproducibility.
+pub fn spray_pixels(
+    canvas: &mut Canvas,
+    x0: i32,
+    y0: i32,
+    x1: i32,
+    y1: i32,
+    color: Color,
+    density: u32,
+    seed: u32,
+    cmd: &mut Command,
+) {
+    let min_x = x0.min(x1);
+    let max_x = x0.max(x1);
+    let min_y = y0.min(y1);
+    let max_y = y0.max(y1);
+    let density = density.clamp(1, 100);
+
+    // Simple deterministic PRNG (xorshift32)
+    let mut rng = seed.wrapping_add(12345);
+    let xorshift = |state: &mut u32| -> u32 {
+        *state ^= *state << 13;
+        *state ^= *state >> 17;
+        *state ^= *state << 5;
+        *state
+    };
+
+    for y in min_y..=max_y {
+        for x in min_x..=max_x {
+            if x < 0 || y < 0 {
+                continue;
+            }
+            let r = xorshift(&mut rng) % 100;
+            if r < density {
+                pencil_pixel(canvas, x as u32, y as u32, color, cmd);
+            }
+        }
+    }
+}
+
 /// Check if the active layer can be drawn on.
 /// Returns `None` if drawable, or `Some(reason)` if not.
 pub fn check_drawable(canvas: &Canvas) -> Option<&'static str> {
