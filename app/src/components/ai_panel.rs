@@ -17,6 +17,7 @@ pub struct AiResult {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum AiStatus {
     Idle,
     Loading,

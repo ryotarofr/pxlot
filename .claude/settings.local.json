@@ -30,7 +30,24 @@
       "Bash(kill 1394)",
       "Bash(cargo test:*)",
       "Bash(xargs wc:*)",
-      "Bash(wc -l /c/Users/ryory/work/rust/pxlot/crates/formats/src/*.rs)"
+      "Bash(wc -l /c/Users/ryory/work/rust/pxlot/crates/formats/src/*.rs)",
+      "Bash(xargs grep:*)",
+      "Bash(find /c/Users/ryory/work/rust/pxlot -type f -name server* -o -name backend* -o -name proxy*)",
+      "Bash(cargo check:*)",
+      "WebFetch(domain:trap.jp)",
+      "Bash(find /c/Users/ryory/work/rust/pxlot/server -type f -name *.rs -o -name *.toml -o -name Dockerfile -o -name docker-compose.yml)",
+      "Bash(find /c/Users/ryory/work/rust/pxlot/server -type f -name *.rs)",
+      "Bash(grep -n \"ReadSignal\\\\|WriteSignal\" /c/Users/ryory/work/rust/pxlot/app/src/components/*.rs)",
+      "Bash(find /c/Users/ryory/work/rust/pxlot/app/src/state -type f -name *.rs)",
+      "Bash(find /c/Users/ryory/work/rust/pxlot -name *.rs -path *tools* -type f)",
+      "Bash(iconv -f UTF-16 -t UTF-8 c:/Users/ryory/work/rust/pxlot/README.md)",
+      "Read(//c/Users/ryory/.claude/projects/c--Users-ryory-work-rust-pxlot/memory/**)",
+      "WebSearch",
+      "Bash(find /c/Users/ryory/work/rust/pxlot/server -type f \\\\\\(-name .env* -o -name migrations \\\\\\))",
+      "WebFetch(domain:replicate.com)"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\ryory\\work\\rust\\pxlot\\server"
     ]
   }
 }

@@ -15,7 +15,10 @@ pub fn export_svg(canvas: &Canvas) -> Result<String, String> {
     if w * h > MAX_SVG_PIXELS {
         return Err(format!(
             "Canvas too large for SVG export ({}x{} = {} pixels, max {}). Reduce canvas size first.",
-            w, h, w * h, MAX_SVG_PIXELS
+            w,
+            h,
+            w * h,
+            MAX_SVG_PIXELS
         ));
     }
 
@@ -82,9 +85,7 @@ mod tests {
             .set_pixel(fx + 1, fy + 2, Color::new(255, 0, 0, 255));
         let svg = export_svg(&canvas).unwrap();
         assert!(svg.contains("viewBox=\"0 0 3 3\""));
-        assert!(svg.contains(
-            "<rect x=\"1\" y=\"2\" width=\"1\" height=\"1\" fill=\"#ff0000\"/>"
-        ));
+        assert!(svg.contains("<rect x=\"1\" y=\"2\" width=\"1\" height=\"1\" fill=\"#ff0000\"/>"));
         // Only one rect should be present.
         assert_eq!(svg.matches("<rect").count(), 1);
     }

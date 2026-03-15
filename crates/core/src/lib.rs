@@ -14,9 +14,24 @@ pub struct Color {
 }
 
 impl Color {
-    pub const TRANSPARENT: Self = Self { r: 0, g: 0, b: 0, a: 0 };
-    pub const BLACK: Self = Self { r: 0, g: 0, b: 0, a: 255 };
-    pub const WHITE: Self = Self { r: 255, g: 255, b: 255, a: 255 };
+    pub const TRANSPARENT: Self = Self {
+        r: 0,
+        g: 0,
+        b: 0,
+        a: 0,
+    };
+    pub const BLACK: Self = Self {
+        r: 0,
+        g: 0,
+        b: 0,
+        a: 255,
+    };
+    pub const WHITE: Self = Self {
+        r: 255,
+        g: 255,
+        b: 255,
+        a: 255,
+    };
 
     pub const fn new(r: u8, g: u8, b: u8, a: u8) -> Self {
         Self { r, g, b, a }
@@ -64,7 +79,11 @@ pub struct PixelBuffer {
 impl PixelBuffer {
     pub fn new(width: u32, height: u32) -> Self {
         let pixels = vec![Color::TRANSPARENT; (width * height) as usize];
-        Self { width, height, pixels }
+        Self {
+            width,
+            height,
+            pixels,
+        }
     }
 
     pub fn get_pixel(&self, x: u32, y: u32) -> Option<&Color> {
@@ -100,6 +119,9 @@ impl PixelBuffer {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BlendMode {
     Normal,
+    Multiply,
+    Screen,
+    Overlay,
 }
 
 /// A single layer in the canvas.
@@ -123,6 +145,54 @@ impl Layer {
             blend_mode: BlendMode::Normal,
             buffer: PixelBuffer::new(width, height),
         }
+    }
+}
+
+/// Apply a blend mode to compute the blended channel value.
+#[inline]
+fn apply_blend_mode(src: f64, dst: f64, mode: BlendMode) -> f64 {
+    match mode {
+        BlendMode::Normal => src,
+        BlendMode::Multiply => src * dst,
+        BlendMode::Screen => 1.0 - (1.0 - src) * (1.0 - dst),
+        BlendMode::Overlay => {
+            if dst < 0.5 {
+                2.0 * src * dst
+            } else {
+                1.0 - 2.0 * (1.0 - src) * (1.0 - dst)
+            }
+        }
+    }
+}
+
+/// Alpha-composite a source pixel (with layer opacity and blend mode) onto a destination RGBA slice.
+#[inline]
+fn blend_pixel(dst: &mut [u8], src: &Color, layer_opacity: f64, mode: BlendMode) {
+    if src.a == 0 {
+        return;
+    }
+    let sa = (src.a as f64 / 255.0) * layer_opacity;
+    let dr = dst[0] as f64 / 255.0;
+    let dg = dst[1] as f64 / 255.0;
+    let db = dst[2] as f64 / 255.0;
+    let da = dst[3] as f64 / 255.0;
+    let (sr, sg, sb) = (
+        src.r as f64 / 255.0,
+        src.g as f64 / 255.0,
+        src.b as f64 / 255.0,
+    );
+
+    // Apply blend mode to get the blended color (only affects RGB, not alpha)
+    let br = apply_blend_mode(sr, dr, mode);
+    let bg = apply_blend_mode(sg, dg, mode);
+    let bb = apply_blend_mode(sb, db, mode);
+
+    let out_a = sa + da * (1.0 - sa);
+    if out_a > 0.0 {
+        dst[0] = ((br * sa + dr * da * (1.0 - sa)) / out_a * 255.0 + 0.5) as u8;
+        dst[1] = ((bg * sa + dg * da * (1.0 - sa)) / out_a * 255.0 + 0.5) as u8;
+        dst[2] = ((bb * sa + db * da * (1.0 - sa)) / out_a * 255.0 + 0.5) as u8;
+        dst[3] = (out_a * 255.0 + 0.5) as u8;
     }
 }
 
@@ -175,12 +245,20 @@ impl Canvas {
 
     /// Frame width for export. Handles backward compat (frame_w==0).
     pub fn frame_width(&self) -> u32 {
-        if self.frame_w > 0 { self.frame_w } else { self.width }
+        if self.frame_w > 0 {
+            self.frame_w
+        } else {
+            self.width
+        }
     }
 
     /// Frame height for export. Handles backward compat (frame_h==0).
     pub fn frame_height(&self) -> u32 {
-        if self.frame_h > 0 { self.frame_h } else { self.height }
+        if self.frame_h > 0 {
+            self.frame_h
+        } else {
+            self.height
+        }
     }
 
     /// Convert frame-relative X to buffer X.
@@ -195,6 +273,16 @@ impl Canvas {
 
     pub fn active_layer_mut(&mut self) -> Option<&mut Layer> {
         self.layers.get_mut(self.active_layer)
+    }
+
+    /// Set the blend mode for a layer by index.
+    pub fn set_layer_blend_mode(&mut self, index: usize, mode: BlendMode) -> bool {
+        if let Some(layer) = self.layers.get_mut(index) {
+            layer.blend_mode = mode;
+            true
+        } else {
+            false
+        }
     }
 
     pub fn active_layer_ref(&self) -> Option<&Layer> {
@@ -293,28 +381,10 @@ impl Canvas {
                 continue;
             }
             let layer_opacity = layer.opacity as f64 / 255.0;
+            let mode = layer.blend_mode;
             for i in 0..size {
                 let src = &layer.buffer.pixels[i];
-                if src.a == 0 {
-                    continue;
-                }
-                let sa = (src.a as f64 / 255.0) * layer_opacity;
-                let di = i * 4;
-                let dr = result[di] as f64 / 255.0;
-                let dg = result[di + 1] as f64 / 255.0;
-                let db = result[di + 2] as f64 / 255.0;
-                let da = result[di + 3] as f64 / 255.0;
-
-                let (sr, sg, sb) = (src.r as f64 / 255.0, src.g as f64 / 255.0, src.b as f64 / 255.0);
-
-                // Normal blend
-                let out_a = sa + da * (1.0 - sa);
-                if out_a > 0.0 {
-                    result[di] = ((sr * sa + dr * da * (1.0 - sa)) / out_a * 255.0) as u8;
-                    result[di + 1] = ((sg * sa + dg * da * (1.0 - sa)) / out_a * 255.0) as u8;
-                    result[di + 2] = ((sb * sa + db * da * (1.0 - sa)) / out_a * 255.0) as u8;
-                    result[di + 3] = (out_a * 255.0) as u8;
-                }
+                blend_pixel(&mut result[i * 4..i * 4 + 4], src, layer_opacity, mode);
             }
         }
         result
@@ -337,6 +407,7 @@ impl Canvas {
                 continue;
             }
             let layer_opacity = layer.opacity as f64 / 255.0;
+            let mode = layer.blend_mode;
             let bw = self.width as usize;
             for ry in 0..rh {
                 let by = ry0 as usize + ry;
@@ -344,25 +415,8 @@ impl Canvas {
                     let bx = rx0 as usize + rx;
                     let buf_i = by * bw + bx;
                     let src = &layer.buffer.pixels[buf_i];
-                    if src.a == 0 {
-                        continue;
-                    }
-                    let sa = (src.a as f64 / 255.0) * layer_opacity;
                     let di = (ry * rw + rx) * 4;
-                    let dr = result[di] as f64 / 255.0;
-                    let dg = result[di + 1] as f64 / 255.0;
-                    let db = result[di + 2] as f64 / 255.0;
-                    let da = result[di + 3] as f64 / 255.0;
-
-                    let (sr, sg, sb) = (src.r as f64 / 255.0, src.g as f64 / 255.0, src.b as f64 / 255.0);
-
-                    let out_a = sa + da * (1.0 - sa);
-                    if out_a > 0.0 {
-                        result[di] = ((sr * sa + dr * da * (1.0 - sa)) / out_a * 255.0) as u8;
-                        result[di + 1] = ((sg * sa + dg * da * (1.0 - sa)) / out_a * 255.0) as u8;
-                        result[di + 2] = ((sb * sa + db * da * (1.0 - sa)) / out_a * 255.0) as u8;
-                        result[di + 3] = (out_a * 255.0) as u8;
-                    }
+                    blend_pixel(&mut result[di..di + 4], src, layer_opacity, mode);
                 }
             }
         }
@@ -376,39 +430,29 @@ impl Canvas {
         let fx0 = self.frame_x;
         let fy0 = self.frame_y;
         let bw = self.width;
+        let bh = self.height;
         let size = (fw * fh) as usize;
         let mut result = vec![0u8; size * 4];
+
+        // Bounds check: ensure frame region fits within buffer
+        if fx0 + fw > bw || fy0 + fh > bh {
+            return result;
+        }
 
         for layer in &self.layers {
             if !layer.visible || layer.opacity == 0 {
                 continue;
             }
             let layer_opacity = layer.opacity as f64 / 255.0;
+            let mode = layer.blend_mode;
             for fy in 0..fh {
                 for fx in 0..fw {
                     let bx = fx + fx0;
                     let by = fy + fy0;
                     let buf_i = (by * bw + bx) as usize;
                     let src = &layer.buffer.pixels[buf_i];
-                    if src.a == 0 {
-                        continue;
-                    }
-                    let sa = (src.a as f64 / 255.0) * layer_opacity;
                     let di = (fy * fw + fx) as usize * 4;
-                    let dr = result[di] as f64 / 255.0;
-                    let dg = result[di + 1] as f64 / 255.0;
-                    let db = result[di + 2] as f64 / 255.0;
-                    let da = result[di + 3] as f64 / 255.0;
-
-                    let (sr, sg, sb) = (src.r as f64 / 255.0, src.g as f64 / 255.0, src.b as f64 / 255.0);
-
-                    let out_a = sa + da * (1.0 - sa);
-                    if out_a > 0.0 {
-                        result[di] = ((sr * sa + dr * da * (1.0 - sa)) / out_a * 255.0) as u8;
-                        result[di + 1] = ((sg * sa + dg * da * (1.0 - sa)) / out_a * 255.0) as u8;
-                        result[di + 2] = ((sb * sa + db * da * (1.0 - sa)) / out_a * 255.0) as u8;
-                        result[di + 3] = (out_a * 255.0) as u8;
-                    }
+                    blend_pixel(&mut result[di..di + 4], src, layer_opacity, mode);
                 }
             }
         }
@@ -466,7 +510,7 @@ mod tests {
         assert_eq!(canvas.frame_height(), 32);
         assert_eq!(canvas.frame_x, 32); // margin = min(32, 64) = 32
         assert_eq!(canvas.frame_y, 32);
-        assert_eq!(canvas.width, 96);   // 32 + 2*32
+        assert_eq!(canvas.width, 96); // 32 + 2*32
         assert_eq!(canvas.height, 96);
     }
 
@@ -497,11 +541,13 @@ mod tests {
         // Set pixel at frame (0,0) = buffer (margin, margin)
         let bx = canvas.frame_x;
         let by = canvas.frame_y;
-        canvas.layers[0].buffer.set_pixel(bx, by, Color::new(255, 0, 0, 255));
+        canvas.layers[0]
+            .buffer
+            .set_pixel(bx, by, Color::new(255, 0, 0, 255));
         let flat = canvas.flatten_frame_visible();
         assert_eq!(flat[0], 255); // R
-        assert_eq!(flat[1], 0);   // G
-        assert_eq!(flat[2], 0);   // B
+        assert_eq!(flat[1], 0); // G
+        assert_eq!(flat[2], 0); // B
         assert_eq!(flat[3], 255); // A
     }
 }

@@ -1,5 +1,5 @@
-use pxlot_core::{Canvas, Color};
 use pxlot_core::history::Command;
+use pxlot_core::{Canvas, Color};
 use std::collections::VecDeque;
 
 /// Available drawing tools.
@@ -24,11 +24,11 @@ pub fn pencil_pixel(canvas: &mut Canvas, x: u32, y: u32, color: Color, cmd: &mut
         if layer.locked || !layer.visible {
             return;
         }
-        if let Some(&old) = layer.buffer.get_pixel(x, y) {
-            if old != color {
-                cmd.add_change(layer_idx, x, y, old, color);
-                layer.buffer.set_pixel(x, y, color);
-            }
+        if let Some(&old) = layer.buffer.get_pixel(x, y)
+            && old != color
+        {
+            cmd.add_change(layer_idx, x, y, old, color);
+            layer.buffer.set_pixel(x, y, color);
         }
     }
 }
@@ -71,14 +71,7 @@ pub fn pencil_line(
 }
 
 /// Erase pixels along a line (set to transparent).
-pub fn eraser_line(
-    canvas: &mut Canvas,
-    x0: i32,
-    y0: i32,
-    x1: i32,
-    y1: i32,
-    cmd: &mut Command,
-) {
+pub fn eraser_line(canvas: &mut Canvas, x0: i32, y0: i32, x1: i32, y1: i32, cmd: &mut Command) {
     pencil_line(canvas, x0, y0, x1, y1, Color::TRANSPARENT, cmd);
 }
 
@@ -87,7 +80,13 @@ const MAX_FLOOD_FILL_PIXELS: usize = 512 * 512;
 
 /// Flood fill from (x, y) with the given color.
 /// Returns true if the fill completed, false if it was aborted due to size limit.
-pub fn flood_fill(canvas: &mut Canvas, x: u32, y: u32, fill_color: Color, cmd: &mut Command) -> bool {
+pub fn flood_fill(
+    canvas: &mut Canvas,
+    x: u32,
+    y: u32,
+    fill_color: Color,
+    cmd: &mut Command,
+) -> bool {
     let layer_idx = canvas.active_layer;
     let Some(layer) = canvas.active_layer_mut() else {
         return false;
@@ -124,16 +123,36 @@ pub fn flood_fill(canvas: &mut Canvas, x: u32, y: u32, fill_color: Color, cmd: &
         cmd.add_change(layer_idx, px, py, current, fill_color);
         layer.buffer.set_pixel(px, py, fill_color);
 
-        if px > 0 {
+        if px > 0
+            && layer
+                .buffer
+                .get_pixel(px - 1, py)
+                .is_some_and(|c| *c == target_color)
+        {
             queue.push_back((px - 1, py));
         }
-        if px + 1 < w {
+        if px + 1 < w
+            && layer
+                .buffer
+                .get_pixel(px + 1, py)
+                .is_some_and(|c| *c == target_color)
+        {
             queue.push_back((px + 1, py));
         }
-        if py > 0 {
+        if py > 0
+            && layer
+                .buffer
+                .get_pixel(px, py - 1)
+                .is_some_and(|c| *c == target_color)
+        {
             queue.push_back((px, py - 1));
         }
-        if py + 1 < h {
+        if py + 1 < h
+            && layer
+                .buffer
+                .get_pixel(px, py + 1)
+                .is_some_and(|c| *c == target_color)
+        {
             queue.push_back((px, py + 1));
         }
     }
@@ -429,6 +448,438 @@ pub fn filled_ellipse_points(x0: i32, y0: i32, x1: i32, y1: i32) -> Vec<(i32, i3
     points
 }
 
+// ── Thick line ───────────────────────────────────────────────
+
+/// Draw a line with a given thickness (circular brush stamp at each point).
+pub fn draw_thick_line(
+    canvas: &mut Canvas,
+    x0: i32,
+    y0: i32,
+    x1: i32,
+    y1: i32,
+    color: Color,
+    thickness: u32,
+    cmd: &mut Command,
+) {
+    let radius = (thickness / 2) as i32;
+    for (px, py) in line_points(x0, y0, x1, y1) {
+        // Stamp a filled circle at each point along the line
+        for dy in -radius..=radius {
+            for dx in -radius..=radius {
+                if dx * dx + dy * dy <= radius * radius {
+                    let sx = px + dx;
+                    let sy = py + dy;
+                    if sx >= 0 && sy >= 0 {
+                        pencil_pixel(canvas, sx as u32, sy as u32, color, cmd);
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── Filled circle ────────────────────────────────────────────
+
+/// Draw a filled circle given center and radius.
+pub fn draw_filled_circle(
+    canvas: &mut Canvas,
+    cx: i32,
+    cy: i32,
+    radius: i32,
+    color: Color,
+    cmd: &mut Command,
+) {
+    for dy in -radius..=radius {
+        for dx in -radius..=radius {
+            if dx * dx + dy * dy <= radius * radius {
+                let px = cx + dx;
+                let py = cy + dy;
+                if px >= 0 && py >= 0 {
+                    pencil_pixel(canvas, px as u32, py as u32, color, cmd);
+                }
+            }
+        }
+    }
+}
+
+// ── Dithered fill ────────────────────────────────────────────
+
+/// Dither pattern types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DitherPattern {
+    /// Checkerboard (50/50 mix)
+    Checker,
+    /// Horizontal stripes
+    HStripes,
+    /// Vertical stripes
+    VStripes,
+    /// Diagonal stripes (top-left to bottom-right)
+    DiagStripes,
+}
+
+/// Fill a rectangular region with a two-color dither pattern.
+pub fn fill_dithered(
+    canvas: &mut Canvas,
+    x0: i32,
+    y0: i32,
+    x1: i32,
+    y1: i32,
+    color1: Color,
+    color2: Color,
+    pattern: DitherPattern,
+    cmd: &mut Command,
+) {
+    let min_x = x0.min(x1);
+    let max_x = x0.max(x1);
+    let min_y = y0.min(y1);
+    let max_y = y0.max(y1);
+    for y in min_y..=max_y {
+        for x in min_x..=max_x {
+            if x < 0 || y < 0 {
+                continue;
+            }
+            let use_color1 = match pattern {
+                DitherPattern::Checker => (x + y) % 2 == 0,
+                DitherPattern::HStripes => y % 2 == 0,
+                DitherPattern::VStripes => x % 2 == 0,
+                DitherPattern::DiagStripes => (x + y) % 3 != 0,
+            };
+            let color = if use_color1 { color1 } else { color2 };
+            pencil_pixel(canvas, x as u32, y as u32, color, cmd);
+        }
+    }
+}
+
+// ── Gradient fill ────────────────────────────────────────────
+
+/// Fill a rectangular region with a stepped gradient between two colors.
+/// `steps` controls how many distinct color bands appear (2 = two-tone, 4 = four-tone, etc.).
+/// The gradient runs top-to-bottom within the rectangle.
+pub fn gradient_fill(
+    canvas: &mut Canvas,
+    x0: i32,
+    y0: i32,
+    x1: i32,
+    y1: i32,
+    color1: Color,
+    color2: Color,
+    steps: u32,
+    cmd: &mut Command,
+) {
+    let min_x = x0.min(x1);
+    let max_x = x0.max(x1);
+    let min_y = y0.min(y1);
+    let max_y = y0.max(y1);
+    let height = (max_y - min_y + 1) as u32;
+    let steps = steps.clamp(2, 16);
+
+    for y in min_y..=max_y {
+        if y < 0 {
+            continue;
+        }
+        let t_raw = (y - min_y) as f64 / (height - 1).max(1) as f64;
+        // Quantize to steps for a pixel-art friendly banded look
+        let t = (t_raw * steps as f64).floor() / (steps - 1).max(1) as f64;
+        let t = t.clamp(0.0, 1.0);
+        let r = (color1.r as f64 + (color2.r as f64 - color1.r as f64) * t + 0.5) as u8;
+        let g = (color1.g as f64 + (color2.g as f64 - color1.g as f64) * t + 0.5) as u8;
+        let b = (color1.b as f64 + (color2.b as f64 - color1.b as f64) * t + 0.5) as u8;
+        let color = Color::new(r, g, b, 255);
+        for x in min_x..=max_x {
+            if x >= 0 {
+                pencil_pixel(canvas, x as u32, y as u32, color, cmd);
+            }
+        }
+    }
+}
+
+// ── Auto-outline ─────────────────────────────────────────────
+
+/// Draw an outline around all non-transparent pixels on the active layer.
+/// Checks 4-directional neighbors; places outline color where a transparent
+/// pixel is adjacent to a non-transparent pixel.
+pub fn draw_outline(canvas: &mut Canvas, outline_color: Color, cmd: &mut Command) {
+    let layer_idx = canvas.active_layer;
+    let Some(layer) = canvas.active_layer_ref() else {
+        return;
+    };
+    if layer.locked || !layer.visible {
+        return;
+    }
+    let w = layer.buffer.width;
+    let h = layer.buffer.height;
+
+    // Collect outline positions first (can't mutate while iterating)
+    let mut outline_positions: Vec<(u32, u32)> = Vec::new();
+
+    for y in 0..h {
+        for x in 0..w {
+            let pixel = layer.buffer.get_pixel(x, y).unwrap();
+            // Only place outline on transparent pixels
+            if pixel.a != 0 {
+                continue;
+            }
+            // Check if any 4-neighbor is non-transparent
+            let neighbors = [
+                (x.wrapping_sub(1), y),
+                (x + 1, y),
+                (x, y.wrapping_sub(1)),
+                (x, y + 1),
+            ];
+            let has_opaque_neighbor = neighbors.iter().any(|&(nx, ny)| {
+                layer
+                    .buffer
+                    .get_pixel(nx, ny)
+                    .is_some_and(|c| c.a != 0)
+            });
+            if has_opaque_neighbor {
+                outline_positions.push((x, y));
+            }
+        }
+    }
+
+    // Now apply the outline
+    let layer = &mut canvas.layers[layer_idx];
+    for (x, y) in outline_positions {
+        if let Some(&old) = layer.buffer.get_pixel(x, y) {
+            if old != outline_color {
+                cmd.add_change(layer_idx, x, y, old, outline_color);
+                layer.buffer.set_pixel(x, y, outline_color);
+            }
+        }
+    }
+}
+
+// ── Replace color ────────────────────────────────────────────
+
+/// Replace all occurrences of `old_color` with `new_color` on the active layer
+/// within the frame region.
+pub fn replace_color(
+    canvas: &mut Canvas,
+    old_color: Color,
+    new_color: Color,
+    cmd: &mut Command,
+) {
+    let layer_idx = canvas.active_layer;
+    let Some(layer) = canvas.active_layer_mut() else {
+        return;
+    };
+    if layer.locked || !layer.visible {
+        return;
+    }
+    let w = layer.buffer.width;
+    let h = layer.buffer.height;
+    for y in 0..h {
+        for x in 0..w {
+            if let Some(&current) = layer.buffer.get_pixel(x, y) {
+                if current == old_color {
+                    cmd.add_change(layer_idx, x, y, current, new_color);
+                    layer.buffer.set_pixel(x, y, new_color);
+                }
+            }
+        }
+    }
+}
+
+// ── Flip / Rotate ────────────────────────────────────────────
+
+/// Flip the active layer horizontally (mirror left↔right) within the frame region.
+pub fn flip_horizontal(canvas: &mut Canvas, cmd: &mut Command) {
+    let layer_idx = canvas.active_layer;
+    let fx = canvas.frame_x;
+    let fy = canvas.frame_y;
+    let fw = canvas.frame_width();
+    let fh = canvas.frame_height();
+    let Some(layer) = canvas.active_layer_mut() else {
+        return;
+    };
+    if layer.locked || !layer.visible {
+        return;
+    }
+
+    for y in 0..fh {
+        for x in 0..fw / 2 {
+            let lx = fx + x;
+            let ly = fy + y;
+            let rx = fx + fw - 1 - x;
+            let left = *layer.buffer.get_pixel(lx, ly).unwrap();
+            let right = *layer.buffer.get_pixel(rx, ly).unwrap();
+            if left != right {
+                cmd.add_change(layer_idx, lx, ly, left, right);
+                cmd.add_change(layer_idx, rx, ly, right, left);
+                layer.buffer.set_pixel(lx, ly, right);
+                layer.buffer.set_pixel(rx, ly, left);
+            }
+        }
+    }
+}
+
+/// Flip the active layer vertically (mirror top↔bottom) within the frame region.
+pub fn flip_vertical(canvas: &mut Canvas, cmd: &mut Command) {
+    let layer_idx = canvas.active_layer;
+    let fx = canvas.frame_x;
+    let fy = canvas.frame_y;
+    let fw = canvas.frame_width();
+    let fh = canvas.frame_height();
+    let Some(layer) = canvas.active_layer_mut() else {
+        return;
+    };
+    if layer.locked || !layer.visible {
+        return;
+    }
+
+    for y in 0..fh / 2 {
+        for x in 0..fw {
+            let bx = fx + x;
+            let ty = fy + y;
+            let by = fy + fh - 1 - y;
+            let top = *layer.buffer.get_pixel(bx, ty).unwrap();
+            let bottom = *layer.buffer.get_pixel(bx, by).unwrap();
+            if top != bottom {
+                cmd.add_change(layer_idx, bx, ty, top, bottom);
+                cmd.add_change(layer_idx, bx, by, bottom, top);
+                layer.buffer.set_pixel(bx, ty, bottom);
+                layer.buffer.set_pixel(bx, by, top);
+            }
+        }
+    }
+}
+
+/// Rotate the active layer 90° clockwise within the frame region.
+/// Only works on square frame regions (frame_width == frame_height).
+pub fn rotate_90(canvas: &mut Canvas, cmd: &mut Command) -> bool {
+    let fw = canvas.frame_width();
+    let fh = canvas.frame_height();
+    if fw != fh {
+        return false; // Only supports square canvases
+    }
+    let fx = canvas.frame_x;
+    let fy = canvas.frame_y;
+    let layer_idx = canvas.active_layer;
+    let Some(layer) = canvas.active_layer_ref() else {
+        return false;
+    };
+    if layer.locked || !layer.visible {
+        return false;
+    }
+
+    // Copy frame region to a temp buffer
+    let mut temp = vec![Color::TRANSPARENT; (fw * fh) as usize];
+    for y in 0..fh {
+        for x in 0..fw {
+            let src = *layer.buffer.get_pixel(fx + x, fy + y).unwrap();
+            // Rotate 90° CW: new(x,y) = old(y, size-1-x)
+            let nx = fh - 1 - y;
+            let ny = x;
+            temp[(ny * fw + nx) as usize] = src;
+        }
+    }
+
+    // Write back rotated pixels
+    let layer = &mut canvas.layers[layer_idx];
+    for y in 0..fh {
+        for x in 0..fw {
+            let bx = fx + x;
+            let by = fy + y;
+            let old = *layer.buffer.get_pixel(bx, by).unwrap();
+            let new_color = temp[(y * fw + x) as usize];
+            if old != new_color {
+                cmd.add_change(layer_idx, bx, by, old, new_color);
+                layer.buffer.set_pixel(bx, by, new_color);
+            }
+        }
+    }
+    true
+}
+
+// ── Filled polygon ───────────────────────────────────────────
+
+/// Draw a filled polygon given a list of vertices.
+/// Uses scanline fill algorithm.
+pub fn draw_filled_polygon(
+    canvas: &mut Canvas,
+    vertices: &[(i32, i32)],
+    color: Color,
+    cmd: &mut Command,
+) {
+    if vertices.len() < 3 {
+        return;
+    }
+    // Find bounding box
+    let min_y = vertices.iter().map(|v| v.1).min().unwrap();
+    let max_y = vertices.iter().map(|v| v.1).max().unwrap();
+
+    for y in min_y..=max_y {
+        // Build list of x intersections with edges
+        let mut nodes: Vec<i32> = Vec::new();
+        let n = vertices.len();
+        for i in 0..n {
+            let j = (i + 1) % n;
+            let (x0, y0) = vertices[i];
+            let (x1, y1) = vertices[j];
+            if (y0 <= y && y1 > y) || (y1 <= y && y0 > y) {
+                let x = x0 + ((y - y0) as i64 * (x1 - x0) as i64 / (y1 - y0) as i64) as i32;
+                nodes.push(x);
+            }
+        }
+        nodes.sort();
+        // Fill between pairs
+        for pair in nodes.chunks(2) {
+            if pair.len() == 2 {
+                for x in pair[0]..=pair[1] {
+                    if x >= 0 && y >= 0 {
+                        pencil_pixel(canvas, x as u32, y as u32, color, cmd);
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── Spray / scatter ──────────────────────────────────────────
+
+/// Scatter random pixels within a rectangular region.
+/// `density` is a percentage (1-100) controlling how many pixels are placed.
+/// Uses a deterministic seed based on coordinates for reproducibility.
+pub fn spray_pixels(
+    canvas: &mut Canvas,
+    x0: i32,
+    y0: i32,
+    x1: i32,
+    y1: i32,
+    color: Color,
+    density: u32,
+    seed: u32,
+    cmd: &mut Command,
+) {
+    let min_x = x0.min(x1);
+    let max_x = x0.max(x1);
+    let min_y = y0.min(y1);
+    let max_y = y0.max(y1);
+    let density = density.clamp(1, 100);
+
+    // Simple deterministic PRNG (xorshift32)
+    let mut rng = seed.wrapping_add(12345);
+    let xorshift = |state: &mut u32| -> u32 {
+        *state ^= *state << 13;
+        *state ^= *state >> 17;
+        *state ^= *state << 5;
+        *state
+    };
+
+    for y in min_y..=max_y {
+        for x in min_x..=max_x {
+            if x < 0 || y < 0 {
+                continue;
+            }
+            let r = xorshift(&mut rng) % 100;
+            if r < density {
+                pencil_pixel(canvas, x as u32, y as u32, color, cmd);
+            }
+        }
+    }
+}
+
 /// Check if the active layer can be drawn on.
 /// Returns `None` if drawable, or `Some(reason)` if not.
 pub fn check_drawable(canvas: &Canvas) -> Option<&'static str> {
@@ -485,7 +936,9 @@ mod tests {
         assert_eq!(cmd.changes.len(), 4);
         for i in 0..4 {
             assert_eq!(
-                canvas.layers[0].buffer.get_pixel(canvas.frame_x + i, canvas.frame_y),
+                canvas.layers[0]
+                    .buffer
+                    .get_pixel(canvas.frame_x + i, canvas.frame_y),
                 Some(&Color::WHITE)
             );
         }
@@ -500,7 +953,7 @@ mod tests {
         // Flood fill fills connected transparent area - entire buffer since all is transparent
         flood_fill(&mut canvas, fx, fy, Color::new(255, 0, 0, 255), &mut cmd);
         // All buffer pixels get filled (buffer is 12x12 = 144 for a 4x4 frame)
-        assert!(cmd.changes.len() > 0);
+        assert!(!cmd.changes.is_empty());
     }
 
     #[test]
@@ -529,7 +982,15 @@ mod tests {
         let fx = canvas.frame_x as i32;
         let fy = canvas.frame_y as i32;
         let mut cmd = Command::new("rect");
-        draw_rect(&mut canvas, fx + 1, fy + 1, fx + 4, fy + 4, Color::WHITE, &mut cmd);
+        draw_rect(
+            &mut canvas,
+            fx + 1,
+            fy + 1,
+            fx + 4,
+            fy + 4,
+            Color::WHITE,
+            &mut cmd,
+        );
         // Perimeter of 4x4 rect: 4+4+2+2 = 12
         assert_eq!(cmd.changes.len(), 12);
     }
@@ -540,8 +1001,16 @@ mod tests {
         let fx = canvas.frame_x as i32;
         let fy = canvas.frame_y as i32;
         let mut cmd = Command::new("ellipse");
-        draw_ellipse(&mut canvas, fx + 2, fy + 2, fx + 10, fy + 8, Color::WHITE, &mut cmd);
-        assert!(cmd.changes.len() > 0);
+        draw_ellipse(
+            &mut canvas,
+            fx + 2,
+            fy + 2,
+            fx + 10,
+            fy + 8,
+            Color::WHITE,
+            &mut cmd,
+        );
+        assert!(!cmd.changes.is_empty());
     }
 
     #[test]
@@ -564,13 +1033,19 @@ mod tests {
         let mut cmd = Command::new("draw");
         pencil_pixel(&mut canvas, bx, by, Color::WHITE, &mut cmd);
 
-        assert_eq!(canvas.layers[0].buffer.get_pixel(bx, by), Some(&Color::WHITE));
+        assert_eq!(
+            canvas.layers[0].buffer.get_pixel(bx, by),
+            Some(&Color::WHITE)
+        );
         apply_undo(&mut canvas, &cmd);
         assert_eq!(
             canvas.layers[0].buffer.get_pixel(bx, by),
             Some(&Color::TRANSPARENT)
         );
         apply_redo(&mut canvas, &cmd);
-        assert_eq!(canvas.layers[0].buffer.get_pixel(bx, by), Some(&Color::WHITE));
+        assert_eq!(
+            canvas.layers[0].buffer.get_pixel(bx, by),
+            Some(&Color::WHITE)
+        );
     }
 }

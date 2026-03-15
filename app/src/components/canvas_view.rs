@@ -2,12 +2,12 @@ use leptos::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{CanvasRenderingContext2d, Element, HtmlCanvasElement, MouseEvent, WheelEvent};
 
-use pxlot_core::history::Command;
 use pxlot_core::Color;
+use pxlot_core::history::Command;
 use pxlot_tools::{
-    check_drawable, draw_ellipse, draw_filled_ellipse, draw_filled_rect, draw_line, draw_rect,
-    ellipse_points, eyedropper, filled_ellipse_points, filled_rect_points, flood_fill,
-    line_points, pencil_line, pencil_pixel, rect_points, ToolKind,
+    ToolKind, check_drawable, draw_ellipse, draw_filled_ellipse, draw_filled_rect, draw_line,
+    draw_rect, ellipse_points, eyedropper, filled_ellipse_points, filled_rect_points, flood_fill,
+    line_points, pencil_line, pencil_pixel, rect_points,
 };
 
 use crate::state::EditorState;
@@ -59,9 +59,9 @@ fn draw_onion_skin_to_buffer(
         }
         let idx = cur - offset;
         let opacity = 0.25 / offset as f64;
-        let flat = state.timeline.frames[idx].canvas.flatten_region(
-            vx0 as u32, vy0 as u32, vx1 as u32, vy1 as u32,
-        );
+        let flat = state.timeline.frames[idx]
+            .canvas
+            .flatten_region(vx0 as u32, vy0 as u32, vx1 as u32, vy1 as u32);
         for ly in 0..((vy1 - vy0) as usize) {
             for lx in 0..rw {
                 let i = (ly * rw + lx) * 4;
@@ -87,9 +87,9 @@ fn draw_onion_skin_to_buffer(
             break;
         }
         let opacity = 0.25 / offset as f64;
-        let flat = state.timeline.frames[idx].canvas.flatten_region(
-            vx0 as u32, vy0 as u32, vx1 as u32, vy1 as u32,
-        );
+        let flat = state.timeline.frames[idx]
+            .canvas
+            .flatten_region(vx0 as u32, vy0 as u32, vx1 as u32, vy1 as u32);
         for ly in 0..((vy1 - vy0) as usize) {
             for lx in 0..rw {
                 let i = (ly * rw + lx) * 4;
@@ -114,6 +114,7 @@ pub fn CanvasView(
     editor: StoredValue<EditorState>,
     render_trigger: ReadSignal<u32>,
     set_color: WriteSignal<Color>,
+    set_dirty: WriteSignal<bool>,
 ) -> impl IntoView {
     let canvas_ref = NodeRef::<leptos::html::Canvas>::new();
     let drag_cmd = StoredValue::new(Option::<Command>::None);
@@ -222,19 +223,24 @@ pub fn CanvasView(
                 }
 
                 // Draw onion skin into buffer
-                draw_onion_skin_to_buffer(
-                    &mut img_data, vis_w, state, vx0, vy0, vx1, vy1,
-                );
+                draw_onion_skin_to_buffer(&mut img_data, vis_w, state, vx0, vy0, vx1, vy1);
 
                 // Blend pixel data on top (only visible region)
-                let flat = state.canvas.flatten_region(vx0 as u32, vy0 as u32, vx1 as u32, vy1 as u32);
+                let flat = state
+                    .canvas
+                    .flatten_region(vx0 as u32, vy0 as u32, vx1 as u32, vy1 as u32);
                 for ly in 0..vis_h {
                     for lx in 0..vis_w {
                         let fi = (ly * vis_w + lx) * 4;
                         let a = flat[fi + 3];
                         if a > 0 {
                             let i = fi;
-                            let dst = [img_data[i], img_data[i + 1], img_data[i + 2], img_data[i + 3]];
+                            let dst = [
+                                img_data[i],
+                                img_data[i + 1],
+                                img_data[i + 2],
+                                img_data[i + 3],
+                            ];
                             let out = blend_over(dst, flat[fi], flat[fi + 1], flat[fi + 2], a);
                             img_data[i..i + 4].copy_from_slice(&out);
                         }
@@ -243,10 +249,8 @@ pub fn CanvasView(
 
                 // Create offscreen canvas and draw ImageData, then scale to viewport
                 let document = web_sys::window().unwrap().document().unwrap();
-                let offscreen: HtmlCanvasElement = document
-                    .create_element("canvas")
-                    .unwrap()
-                    .unchecked_into();
+                let offscreen: HtmlCanvasElement =
+                    document.create_element("canvas").unwrap().unchecked_into();
                 offscreen.set_width(vis_w as u32);
                 offscreen.set_height(vis_h as u32);
                 let off_ctx: CanvasRenderingContext2d = offscreen
@@ -258,9 +262,11 @@ pub fn CanvasView(
 
                 // Create ImageData from buffer
                 let clamped = wasm_bindgen::Clamped(&img_data[..]);
-                if let Ok(image_data) =
-                    web_sys::ImageData::new_with_u8_clamped_array_and_sh(clamped, vis_w as u32, vis_h as u32)
-                {
+                if let Ok(image_data) = web_sys::ImageData::new_with_u8_clamped_array_and_sh(
+                    clamped,
+                    vis_w as u32,
+                    vis_h as u32,
+                ) {
                     let _ = off_ctx.put_image_data(&image_data, 0.0, 0.0);
 
                     // Draw scaled to main canvas
@@ -313,10 +319,7 @@ pub fn CanvasView(
 
                 if let Some(points) = preview_points {
                     let color = state.current_color;
-                    let style = format!(
-                        "rgba({},{},{},0.6)",
-                        color.r, color.g, color.b
-                    );
+                    let style = format!("rgba({},{},{},0.6)", color.r, color.g, color.b);
                     ctx.set_fill_style_str(&style);
                     for (px, py) in points {
                         if px >= 0 && py >= 0 && (px as u32) < buf_w && (py as u32) < buf_h {
@@ -332,16 +335,18 @@ pub fn CanvasView(
             }
 
             // Helper to draw a dashed selection rectangle
-            let draw_dashed_rect = |ctx: &CanvasRenderingContext2d, rx: f64, ry: f64, rw: f64, rh: f64| {
-                ctx.set_stroke_style_str("rgba(74,158,255,0.8)");
-                ctx.set_line_width(1.0);
-                ctx.set_line_dash(&js_sys::Array::of2(
-                    &wasm_bindgen::JsValue::from(4.0),
-                    &wasm_bindgen::JsValue::from(4.0),
-                )).ok();
-                ctx.stroke_rect(rx, ry, rw, rh);
-                ctx.set_line_dash(&js_sys::Array::new()).ok();
-            };
+            let draw_dashed_rect =
+                |ctx: &CanvasRenderingContext2d, rx: f64, ry: f64, rw: f64, rh: f64| {
+                    ctx.set_stroke_style_str("rgba(74,158,255,0.8)");
+                    ctx.set_line_width(1.0);
+                    ctx.set_line_dash(&js_sys::Array::of2(
+                        &wasm_bindgen::JsValue::from(4.0),
+                        &wasm_bindgen::JsValue::from(4.0),
+                    ))
+                    .ok();
+                    ctx.stroke_rect(rx, ry, rw, rh);
+                    ctx.set_line_dash(&js_sys::Array::new()).ok();
+                };
 
             // Draw selection rectangle
             if let Some((sx, sy, sw, sh)) = state.selection {
@@ -449,10 +454,30 @@ pub fn CanvasView(
             // Corner markers (small filled squares at each corner)
             let corner_size = (zoom * 0.6).clamp(3.0, 12.0);
             ctx.set_fill_style_str("rgba(80,140,200,0.7)");
-            ctx.fill_rect(frame_left - corner_size * 0.5, frame_top - corner_size * 0.5, corner_size, corner_size);
-            ctx.fill_rect(frame_right - corner_size * 0.5, frame_top - corner_size * 0.5, corner_size, corner_size);
-            ctx.fill_rect(frame_left - corner_size * 0.5, frame_bottom - corner_size * 0.5, corner_size, corner_size);
-            ctx.fill_rect(frame_right - corner_size * 0.5, frame_bottom - corner_size * 0.5, corner_size, corner_size);
+            ctx.fill_rect(
+                frame_left - corner_size * 0.5,
+                frame_top - corner_size * 0.5,
+                corner_size,
+                corner_size,
+            );
+            ctx.fill_rect(
+                frame_right - corner_size * 0.5,
+                frame_top - corner_size * 0.5,
+                corner_size,
+                corner_size,
+            );
+            ctx.fill_rect(
+                frame_left - corner_size * 0.5,
+                frame_bottom - corner_size * 0.5,
+                corner_size,
+                corner_size,
+            );
+            ctx.fill_rect(
+                frame_right - corner_size * 0.5,
+                frame_bottom - corner_size * 0.5,
+                corner_size,
+                corner_size,
+            );
 
             // Dim area outside the frame (semi-transparent overlay)
             {
@@ -469,13 +494,20 @@ pub fn CanvasView(
                     ctx.fill_rect(0.0, strip_top, frame_left, strip_bottom - strip_top);
                 }
                 if frame_right < vp_w && strip_bottom > strip_top {
-                    ctx.fill_rect(frame_right, strip_top, vp_w - frame_right, strip_bottom - strip_top);
+                    ctx.fill_rect(
+                        frame_right,
+                        strip_top,
+                        vp_w - frame_right,
+                        strip_bottom - strip_top,
+                    );
                 }
             }
 
             // Pixel cursor highlight
-            if state.hover_x >= 0 && state.hover_y >= 0
-                && (state.hover_x as u32) < buf_w && (state.hover_y as u32) < buf_h
+            if state.hover_x >= 0
+                && state.hover_y >= 0
+                && (state.hover_x as u32) < buf_w
+                && (state.hover_y as u32) < buf_h
             {
                 let hx = state.hover_x as f64 * zoom + pan_x;
                 let hy = state.hover_y as f64 * zoom + pan_y;
@@ -485,8 +517,10 @@ pub fn CanvasView(
             }
 
             // Coordinate label near cursor (relative to frame origin)
-            if state.hover_x >= 0 && state.hover_y >= 0
-                && (state.hover_x as u32) < buf_w && (state.hover_y as u32) < buf_h
+            if state.hover_x >= 0
+                && state.hover_y >= 0
+                && (state.hover_x as u32) < buf_w
+                && (state.hover_y as u32) < buf_h
             {
                 let rel_x = state.hover_x - fx0 as i32;
                 let rel_y = state.hover_y - fy0 as i32;
@@ -497,8 +531,8 @@ pub fn CanvasView(
                 let tw = label.len() as f64 * 6.6;
                 ctx.set_fill_style_str("rgba(0,0,0,0.7)");
                 ctx.fill_rect(lx - 2.0, ly - 10.0, tw + 4.0, 14.0);
-                let in_frame = rel_x >= 0 && rel_y >= 0
-                    && (rel_x as u32) < fw && (rel_y as u32) < fh;
+                let in_frame =
+                    rel_x >= 0 && rel_y >= 0 && (rel_x as u32) < fw && (rel_y as u32) < fh;
                 if in_frame {
                     ctx.set_fill_style_str("rgba(200,220,255,0.9)");
                 } else {
@@ -563,13 +597,22 @@ pub fn CanvasView(
                 return;
             }
 
-            let effective_tool = if right_click { ToolKind::Eraser } else { state.current_tool };
+            let effective_tool = if right_click {
+                ToolKind::Eraser
+            } else {
+                state.current_tool
+            };
 
             let needs_draw = matches!(
                 effective_tool,
-                ToolKind::Pencil | ToolKind::Eraser | ToolKind::Fill
-                    | ToolKind::Line | ToolKind::Rectangle | ToolKind::Ellipse
-                    | ToolKind::FilledRectangle | ToolKind::FilledEllipse
+                ToolKind::Pencil
+                    | ToolKind::Eraser
+                    | ToolKind::Fill
+                    | ToolKind::Line
+                    | ToolKind::Rectangle
+                    | ToolKind::Ellipse
+                    | ToolKind::FilledRectangle
+                    | ToolKind::FilledEllipse
             );
             if needs_draw {
                 if let Some(reason) = check_drawable(&state.canvas) {
@@ -597,7 +640,8 @@ pub fn CanvasView(
                             &mut cmd,
                         );
                         if state.mirror_x {
-                            let frame_center_x = state.canvas.frame_x as i32 * 2 + state.canvas.frame_width() as i32;
+                            let frame_center_x =
+                                state.canvas.frame_x as i32 * 2 + state.canvas.frame_width() as i32;
                             let mx = frame_center_x - 1 - px;
                             if mx >= 0 {
                                 flood_fill(
@@ -630,17 +674,27 @@ pub fn CanvasView(
                     if px >= 0 && py >= 0 {
                         pencil_pixel(&mut state.canvas, px as u32, py as u32, color, &mut cmd);
                         if state.mirror_x {
-                            let frame_center_x = state.canvas.frame_x as i32 * 2 + state.canvas.frame_width() as i32;
+                            let frame_center_x =
+                                state.canvas.frame_x as i32 * 2 + state.canvas.frame_width() as i32;
                             let mx = frame_center_x - 1 - px;
                             if mx >= 0 {
-                                pencil_pixel(&mut state.canvas, mx as u32, py as u32, color, &mut cmd);
+                                pencil_pixel(
+                                    &mut state.canvas,
+                                    mx as u32,
+                                    py as u32,
+                                    color,
+                                    &mut cmd,
+                                );
                             }
                         }
                     }
                     drag_cmd.set_value(Some(cmd));
                 }
-                ToolKind::Line | ToolKind::Rectangle | ToolKind::Ellipse
-                | ToolKind::FilledRectangle | ToolKind::FilledEllipse => {
+                ToolKind::Line
+                | ToolKind::Rectangle
+                | ToolKind::Ellipse
+                | ToolKind::FilledRectangle
+                | ToolKind::FilledEllipse => {
                     state.is_drawing = true;
                     state.shape_start_x = px;
                     state.shape_start_y = py;
@@ -662,6 +716,7 @@ pub fn CanvasView(
         editor.with_value(|state| {
             storage::autosave(&state.canvas, &state.history);
         });
+        set_dirty.set(true);
     };
 
     let on_mousemove = move |ev: MouseEvent| {
@@ -699,7 +754,8 @@ pub fn CanvasView(
                         state.current_color
                     };
                     let mirror = state.mirror_x;
-                    let frame_center_x = state.canvas.frame_x as i32 * 2 + state.canvas.frame_width() as i32;
+                    let frame_center_x =
+                        state.canvas.frame_x as i32 * 2 + state.canvas.frame_width() as i32;
                     drag_cmd.update_value(|opt_cmd| {
                         if let Some(cmd) = opt_cmd {
                             pencil_line(
@@ -729,8 +785,12 @@ pub fn CanvasView(
                     state.last_draw_x = px;
                     state.last_draw_y = py;
                 }
-                ToolKind::Line | ToolKind::Rectangle | ToolKind::Ellipse
-                | ToolKind::FilledRectangle | ToolKind::FilledEllipse | ToolKind::RectSelect => {
+                ToolKind::Line
+                | ToolKind::Rectangle
+                | ToolKind::Ellipse
+                | ToolKind::FilledRectangle
+                | ToolKind::FilledEllipse
+                | ToolKind::RectSelect => {
                     state.last_draw_x = px;
                     state.last_draw_y = py;
                 }
@@ -821,9 +881,13 @@ pub fn CanvasView(
                     ToolKind::RectSelect => {
                         let min_x = state.shape_start_x.min(state.last_draw_x).max(0);
                         let min_y = state.shape_start_y.min(state.last_draw_y).max(0);
-                        let max_x = state.shape_start_x.max(state.last_draw_x)
+                        let max_x = state
+                            .shape_start_x
+                            .max(state.last_draw_x)
                             .min(state.canvas.width as i32 - 1);
-                        let max_y = state.shape_start_y.max(state.last_draw_y)
+                        let max_y = state
+                            .shape_start_y
+                            .max(state.last_draw_y)
                             .min(state.canvas.height as i32 - 1);
                         let sel_w = max_x - min_x + 1;
                         let sel_h = max_y - min_y + 1;
@@ -841,6 +905,7 @@ pub fn CanvasView(
         editor.with_value(|state| {
             storage::autosave(&state.canvas, &state.history);
         });
+        set_dirty.set(true);
     };
 
     let on_wheel = move |ev: WheelEvent| {

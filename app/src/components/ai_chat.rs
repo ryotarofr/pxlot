@@ -14,8 +14,6 @@ pub fn AiChat(
     messages: ReadSignal<Vec<ChatMessage>>,
     /// Whether the agent loop is running.
     is_running: ReadSignal<bool>,
-    /// Whether an API key is configured.
-    has_api_key: ReadSignal<bool>,
     /// Whether the panel is open.
     is_open: ReadSignal<bool>,
     /// Close the panel.
@@ -26,18 +24,18 @@ pub fn AiChat(
     on_stop: Callback<()>,
     /// Clear conversation.
     on_clear: Callback<()>,
-    /// Save API key.
-    on_save_api_key: Callback<String>,
     /// Change model.
     on_model_change: Callback<String>,
     /// Current model name.
     model: ReadSignal<String>,
     /// Token usage display.
     token_usage: ReadSignal<(usize, usize)>,
+    /// Generation mode: "ai_draw" or "image_gen".
+    gen_mode: ReadSignal<String>,
+    /// Change generation mode.
+    on_gen_mode_change: Callback<String>,
 ) -> impl IntoView {
     let (input_text, set_input_text) = signal(String::new());
-    let (show_key_input, set_show_key_input) = signal(false);
-    let (key_input, set_key_input) = signal(String::new());
     let (panel_width, set_panel_width) = signal(DEFAULT_WIDTH);
     let (is_resizing, set_is_resizing) = signal(false);
     let message_container_ref = NodeRef::<leptos::html::Div>::new();
@@ -58,7 +56,8 @@ pub fn AiChat(
                 set_panel_width.set(new_width);
             },
         );
-        let move_fn: js_sys::Function = on_move.as_ref().unchecked_ref::<js_sys::Function>().clone();
+        let move_fn: js_sys::Function =
+            on_move.as_ref().unchecked_ref::<js_sys::Function>().clone();
         // Keep alive until mouseup
         std::mem::forget(on_move);
 
@@ -108,15 +107,6 @@ pub fn AiChat(
         }
     };
 
-    let do_save_key = move || {
-        let key = key_input.get().trim().to_string();
-        if !key.is_empty() {
-            on_save_api_key.run(key);
-        }
-        set_show_key_input.set(false);
-        set_key_input.set(String::new());
-    };
-
     view! {
         <aside
             class="ai-chat-sidebar"
@@ -136,13 +126,6 @@ pub fn AiChat(
                 <div class="ai-chat-header-actions">
                     <button
                         class="ai-chat-icon-btn"
-                        title="API Key Settings"
-                        on:click=move |_| set_show_key_input.update(|v| *v = !*v)
-                    >
-                        {move || if has_api_key.get() { "K" } else { "K!" }}
-                    </button>
-                    <button
-                        class="ai-chat-icon-btn"
                         title="Clear Chat"
                         on:click=move |_| on_clear.run(())
                     >
@@ -158,52 +141,57 @@ pub fn AiChat(
                 </div>
             </div>
 
-            // API Key input (toggled)
-            {move || {
-                if show_key_input.get() {
-                    Some(view! {
-                        <div class="ai-key-section">
-                            <input
-                                type="password"
-                                class="ai-key-input"
-                                placeholder="sk-ant-..."
-                                prop:value=move || key_input.get()
-                                on:input=move |ev| set_key_input.set(event_target_value(&ev))
-                                on:keydown=move |ev: web_sys::KeyboardEvent| {
-                                    if ev.key() == "Enter" {
-                                        do_save_key();
-                                    }
-                                }
-                            />
-                            <button class="ai-key-save-btn" on:click=move |_| do_save_key()>
-                                "Save"
-                            </button>
-                        </div>
-                    })
-                } else {
-                    None
-                }
-            }}
-
-            // Model selector
+            // Mode selector
             <div class="ai-model-select">
                 <select
                     class="ai-select"
-                    on:change=move |ev| on_model_change.run(event_target_value(&ev))
+                    on:change=move |ev| on_gen_mode_change.run(event_target_value(&ev))
                 >
                     <option
-                        value="claude-sonnet-4-6"
-                        selected=move || model.get() == "claude-sonnet-4-6"
+                        value="ai_draw"
+                        selected=move || gen_mode.get() == "ai_draw"
                     >
-                        "Sonnet 4.6"
+                        "AI Draw"
                     </option>
                     <option
-                        value="claude-haiku-4-5-20251001"
-                        selected=move || model.get() == "claude-haiku-4-5-20251001"
+                        value="image_gen"
+                        selected=move || gen_mode.get() == "image_gen"
                     >
-                        "Haiku 4.5"
+                        "Image Gen"
                     </option>
                 </select>
+                // Model selector (only shown for AI Draw mode)
+                {move || {
+                    if gen_mode.get() == "ai_draw" {
+                        view! {
+                            <select
+                                class="ai-select"
+                                on:change=move |ev| on_model_change.run(event_target_value(&ev))
+                            >
+                                <option
+                                    value="claude-opus-4-6"
+                                    selected=move || model.get() == "claude-opus-4-6"
+                                >
+                                    "Opus 4.6"
+                                </option>
+                                <option
+                                    value="claude-sonnet-4-6"
+                                    selected=move || model.get() == "claude-sonnet-4-6"
+                                >
+                                    "Sonnet 4.6"
+                                </option>
+                                <option
+                                    value="claude-haiku-4-5-20251001"
+                                    selected=move || model.get() == "claude-haiku-4-5-20251001"
+                                >
+                                    "Haiku 4.5"
+                                </option>
+                            </select>
+                        }.into_any()
+                    } else {
+                        view! { <span></span> }.into_any()
+                    }
+                }}
                 <span class="ai-token-usage">
                     {move || {
                         let (inp, out) = token_usage.get();
@@ -240,16 +228,14 @@ pub fn AiChat(
                 <textarea
                     class="ai-chat-input"
                     placeholder=move || {
-                        if !has_api_key.get() {
-                            "Set API key first (K button)"
-                        } else if is_running.get() {
+                        if is_running.get() {
                             "AI is working..."
                         } else {
                             "Describe pixel art to create..."
                         }
                     }
                     prop:value=move || input_text.get()
-                    prop:disabled=move || is_running.get() || !has_api_key.get()
+                    prop:disabled=move || is_running.get()
                     on:input=move |ev| set_input_text.set(event_target_value(&ev))
                     on:keydown=on_input_keydown
                     rows="3"
@@ -270,7 +256,7 @@ pub fn AiChat(
                                 <button
                                     class="ai-chat-send-btn"
                                     prop:disabled=move || {
-                                        input_text.get().trim().is_empty() || !has_api_key.get()
+                                        input_text.get().trim().is_empty()
                                     }
                                     on:click=move |_| do_send()
                                 >
@@ -311,7 +297,8 @@ fn render_message(msg: &ChatMessage) -> leptos::prelude::AnyView {
                     </span>
                     <span class="ai-msg-text">{text}</span>
                 </div>
-            }.into_any()
+            }
+            .into_any()
         }
         ChatContent::ToolUse { name, status } => {
             let status_class = match status {
@@ -330,7 +317,8 @@ fn render_message(msg: &ChatMessage) -> leptos::prelude::AnyView {
                     <span class="ai-tool-name">{format!("[{}]", name)}</span>
                     <span class="ai-tool-status">{status_text}</span>
                 </div>
-            }.into_any()
+            }
+            .into_any()
         }
         ChatContent::Status(text) => {
             let text = text.clone();
@@ -338,7 +326,8 @@ fn render_message(msg: &ChatMessage) -> leptos::prelude::AnyView {
                 <div class="ai-chat-msg ai-chat-status">
                     <span>{text}</span>
                 </div>
-            }.into_any()
+            }
+            .into_any()
         }
     }
 }

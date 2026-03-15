@@ -17,16 +17,22 @@ pub fn ToolPanel(
         (ToolKind::Eyedropper, "I", "Eyedropper (I)"),
     ];
 
-    let select_tools = vec![
-        (ToolKind::RectSelect, "S", "Rect Select (M)"),
-    ];
+    let select_tools = vec![(ToolKind::RectSelect, "S", "Rect Select (M)")];
 
     let shape_tools = vec![
         (ToolKind::Line, "L", "Line (L)"),
         (ToolKind::Rectangle, "R", "Rectangle (R)"),
         (ToolKind::Ellipse, "O", "Ellipse (O)"),
-        (ToolKind::FilledRectangle, "\u{25a0}", "Filled Rectangle (Shift+R)"),
-        (ToolKind::FilledEllipse, "\u{25cf}", "Filled Ellipse (Shift+O)"),
+        (
+            ToolKind::FilledRectangle,
+            "\u{25a0}",
+            "Filled Rectangle (Shift+R)",
+        ),
+        (
+            ToolKind::FilledEllipse,
+            "\u{25cf}",
+            "Filled Ellipse (Shift+O)",
+        ),
     ];
 
     let make_buttons = move |tools: Vec<(ToolKind, &'static str, &'static str)>| {

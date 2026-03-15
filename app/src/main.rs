@@ -1,11 +1,12 @@
 use leptos::prelude::*;
-use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
+use wasm_bindgen::prelude::*;
 
 mod ai;
+mod auth;
 mod components;
 mod i18n;
-mod project_store;
+mod project_api;
 mod state;
 mod storage;
 
@@ -13,21 +14,195 @@ use components::ai_chat::AiChat;
 use components::ai_panel::{AiPanel, AiResult, AiStatus};
 use components::canvas_view::CanvasView;
 use components::color_picker::ColorPicker;
+use components::gallery::GalleryPage;
 use components::layer_panel::{LayerInfo, LayerPanel};
+use components::login::LoginScreen;
+use components::project_list::ProjectList;
+use components::project_list_page::{ProjectAction, ProjectListPage};
 use components::timeline::TimelinePanel;
 use components::tool_panel::ToolPanel;
-use pxlot_core::image_processing::{self, DitherMethod, DownsampleMethod}; // DownsampleMethod used internally
+use i18n::{Lang, t};
 use pxlot_core::Color;
+use pxlot_core::history::Command;
+use pxlot_core::image_processing::{self, DitherMethod, DownsampleMethod}; // DownsampleMethod used internally
 use pxlot_formats::{gif_format, png_format};
-use pxlot_tools::{apply_redo, apply_undo, ToolKind};
-use i18n::{t, Lang};
+use pxlot_tools::{ToolKind, apply_redo, apply_undo};
 use state::EditorState;
 
 fn main() {
     console_error_panic_hook::set_once();
     _ = console_log::init_with_level(log::Level::Debug);
     log::info!("pxlot starting...");
-    mount_to_body(App);
+
+    // Check URL path to decide which page to mount
+    let is_gallery = web_sys::window()
+        .and_then(|w| w.location().pathname().ok())
+        .map(|p| p.ends_with("/gallery") || p.ends_with("/gallery/"))
+        .unwrap_or(false);
+
+    if is_gallery {
+        mount_to_body(GalleryPage);
+    } else {
+        mount_to_body(Root);
+    }
+}
+
+/// Which screen the app is on.
+#[derive(Clone)]
+enum AppScreen {
+    /// Not yet logged in.
+    Login,
+    /// Showing project list.
+    Projects,
+    /// In the editor — optionally loading a project by ID.
+    Editor {
+        project_id: Option<String>,
+        width: u32,
+        height: u32,
+    },
+}
+
+/// Read the `project` query parameter from the current URL.
+fn get_project_id_from_url() -> Option<String> {
+    let search = web_sys::window()?.location().search().ok()?;
+    let params = web_sys::UrlSearchParams::new_with_str(&search).ok()?;
+    params.get("project")
+}
+
+/// Update the URL query string via `history.replaceState` without page reload.
+fn set_url_project_id(project_id: Option<&str>) {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let Ok(pathname) = window.location().pathname() else {
+        return;
+    };
+    let base = pathname.trim_end_matches('/');
+    let new_url = match project_id {
+        Some(id) => format!("{base}?project={id}"),
+        None => format!("{base}/"),
+    };
+    let _ = window
+        .history()
+        .and_then(|h| h.replace_state_with_url(&JsValue::NULL, "", Some(&new_url)));
+}
+
+/// Root component — routes between login, project list, and editor.
+#[component]
+fn Root() -> impl IntoView {
+    let (_auth_user, set_auth_user) = signal(Option::<auth::AuthUser>::None);
+    let (google_client_id, set_google_client_id) = signal(String::new());
+    let (config_loaded, set_config_loaded) = signal(false);
+
+    // Start on login or project list depending on saved session
+    let saved_user = auth::load_user();
+    let url_project_id = get_project_id_from_url();
+    let initial_screen = if saved_user.is_none() {
+        AppScreen::Login
+    } else if let Some(id) = url_project_id {
+        AppScreen::Editor {
+            project_id: Some(id),
+            width: 32,
+            height: 32,
+        }
+    } else {
+        AppScreen::Projects
+    };
+    let (screen, set_screen) = signal(initial_screen);
+
+    // If we started with a saved session, verify the token is still valid
+    if let Some(user) = saved_user {
+        set_auth_user.set(Some(user));
+        let set_screen = set_screen;
+        let set_auth_user = set_auth_user;
+        leptos::task::spawn_local(async move {
+            match auth::verify_token().await {
+                Ok(user) => {
+                    set_auth_user.set(Some(user));
+                }
+                Err(_) => {
+                    // Token expired, redirect to login
+                    auth::clear_auth();
+                    set_auth_user.set(None);
+                    set_screen.set(AppScreen::Login);
+                }
+            }
+        });
+    }
+
+    // Fetch Google Client ID from server
+    leptos::task::spawn_local(async move {
+        match auth::fetch_config().await {
+            Ok(client_id) => {
+                set_google_client_id.set(client_id);
+            }
+            Err(e) => {
+                log::error!("Failed to fetch config: {e}");
+            }
+        }
+        set_config_loaded.set(true);
+    });
+
+    let on_login = Callback::new(move |user: auth::AuthUser| {
+        set_auth_user.set(Some(user));
+        set_url_project_id(None);
+        set_screen.set(AppScreen::Projects);
+    });
+
+    let on_logout = Callback::new(move |_: ()| {
+        auth::clear_auth();
+        set_auth_user.set(None);
+        set_url_project_id(None);
+        set_screen.set(AppScreen::Login);
+    });
+
+    let on_project_action = Callback::new(move |action: ProjectAction| match action {
+        ProjectAction::Open(id) => {
+            set_url_project_id(Some(&id));
+            set_screen.set(AppScreen::Editor {
+                project_id: Some(id),
+                width: 32,
+                height: 32,
+            });
+        }
+        ProjectAction::New { width, height } => {
+            set_url_project_id(None);
+            set_screen.set(AppScreen::Editor {
+                project_id: None,
+                width,
+                height,
+            });
+        }
+    });
+
+    let on_back_to_projects = Callback::new(move |_: ()| {
+        // Clear beforeunload handler so the alert doesn't fire on the project list screen
+        if let Some(window) = web_sys::window() {
+            window.set_onbeforeunload(None);
+        }
+        set_url_project_id(None);
+        set_screen.set(AppScreen::Projects);
+    });
+
+    view! {
+        {move || {
+            if !config_loaded.get() {
+                return view! { <div class="login-screen"><p>"Loading..."</p></div> }.into_any();
+            }
+            match screen.get() {
+                AppScreen::Login => {
+                    let client_id = google_client_id.get();
+                    view! { <LoginScreen on_login=on_login google_client_id=client_id /> }.into_any()
+                }
+                AppScreen::Projects => {
+                    view! { <ProjectListPage on_action=on_project_action on_logout=on_logout /> }.into_any()
+                }
+                AppScreen::Editor { project_id, width, height } => {
+                    view! { <App on_back=on_back_to_projects initial_project_id=project_id initial_width=width initial_height=height /> }.into_any()
+                }
+            }
+        }}
+    }
 }
 
 /// Trigger a browser download of binary data as a file.
@@ -47,11 +222,7 @@ fn download_bytes(data: &[u8], filename: &str, mime: &str) {
 
     let url = web_sys::Url::create_object_url_with_blob(&blob).unwrap();
 
-    let a: web_sys::HtmlAnchorElement = document
-        .create_element("a")
-        .unwrap()
-        .dyn_into()
-        .unwrap();
+    let a: web_sys::HtmlAnchorElement = document.create_element("a").unwrap().dyn_into().unwrap();
     a.set_href(&url);
     a.set_download(filename);
     a.click();
@@ -60,22 +231,20 @@ fn download_bytes(data: &[u8], filename: &str, mime: &str) {
 }
 
 #[component]
-fn App() -> impl IntoView {
-    // Try to load autosave, otherwise create new canvas
-    let (canvas_width, canvas_height, editor) = if let Some(saved) = storage::load_autosave() {
-        let w = saved.frame_width();
-        let h = saved.frame_height();
-        let mut state = EditorState::new(w, h);
-        state.canvas = saved.clone();
-        state.timeline = pxlot_animation::Timeline::new(saved);
-        // Restore undo/redo history if available
-        if let Some(history) = storage::load_history() {
-            state.history = history;
-        }
-        (w, h, StoredValue::new(state))
-    } else {
-        let w = 32u32;
-        let h = 32u32;
+fn App(
+    /// Callback to go back to project list.
+    on_back: Callback<()>,
+    /// Project ID to load on mount (None = new project).
+    initial_project_id: Option<String>,
+    /// Canvas width for new projects.
+    initial_width: u32,
+    /// Canvas height for new projects.
+    initial_height: u32,
+) -> impl IntoView {
+    // Create editor state with the requested dimensions
+    let (canvas_width, canvas_height, editor) = {
+        let w = initial_width;
+        let h = initial_height;
         (w, h, StoredValue::new(EditorState::new(w, h)))
     };
 
@@ -95,6 +264,7 @@ fn App() -> impl IntoView {
         visible: true,
         locked: false,
         opacity: 255,
+        blend_mode: pxlot_core::BlendMode::Normal,
     }]);
     let (active_layer, set_active_layer) = signal(0usize);
 
@@ -118,39 +288,74 @@ fn App() -> impl IntoView {
     // AI Chat signals
     let (chat_messages, set_chat_messages) = signal(Vec::<ai::ChatMessage>::new());
     let (ai_running, set_ai_running) = signal(false);
-    let (ai_has_key, set_ai_has_key) = signal(ai::load_api_key().is_some());
     let (ai_model, set_ai_model) = signal("claude-sonnet-4-6".to_string());
     let (ai_token_usage, set_ai_token_usage) = signal((0usize, 0usize));
     let (chat_open, set_chat_open) = signal(false);
+    // Generation mode: "ai_draw" (LLM drawing ops) or "image_gen" (Replicate image generation)
+    let (gen_mode, set_gen_mode) = signal("ai_draw".to_string());
+    let ai_stop_flag = ai::agent::new_stop_flag();
+    let ai_conversation = StoredValue::new(Vec::<ai::api_client::ApiMessage>::new());
 
     // AI Chat callbacks
+    let stop_flag_for_send = ai_stop_flag.clone();
     let on_chat_send = Callback::new(move |text: String| {
-        // Add user message
+        // Prevent double execution
+        if ai_running.get() {
+            return;
+        }
+
+        // Add user message to chat
         set_chat_messages.update(|msgs| {
             msgs.push(ai::ChatMessage::user(&text));
         });
-        // TODO: trigger agent loop (Phase 2)
-        set_chat_messages.update(|msgs| {
-            msgs.push(ai::ChatMessage::status("Agent not yet connected. API integration coming soon."));
-        });
+
+        let mode = gen_mode.get();
+        let model = ai_model.get();
+        let stop = stop_flag_for_send.clone();
+        stop.store(false, std::sync::atomic::Ordering::Relaxed);
+
+        if mode == "image_gen" {
+            // Image generation via Replicate
+            wasm_bindgen_futures::spawn_local(ai::image_gen::run_image_generation(
+                text,
+                editor,
+                set_chat_messages,
+                set_ai_running,
+                set_render_trigger,
+            ));
+        } else {
+            // AI drawing via LLM
+            wasm_bindgen_futures::spawn_local(ai::agent::run_agent(
+                text,
+                model,
+                editor,
+                ai_conversation,
+                set_chat_messages,
+                set_ai_running,
+                set_ai_token_usage,
+                set_render_trigger,
+                stop,
+            ));
+        }
     });
 
+    let stop_flag_for_stop = ai_stop_flag.clone();
     let on_chat_stop = Callback::new(move |_: ()| {
-        set_ai_running.set(false);
+        stop_flag_for_stop.store(true, std::sync::atomic::Ordering::Relaxed);
     });
 
     let on_chat_clear = Callback::new(move |_: ()| {
         set_chat_messages.set(Vec::new());
         set_ai_token_usage.set((0, 0));
-    });
-
-    let on_chat_save_key = Callback::new(move |key: String| {
-        ai::save_api_key(&key);
-        set_ai_has_key.set(true);
+        ai_conversation.set_value(Vec::new());
     });
 
     let on_chat_model_change = Callback::new(move |model: String| {
         set_ai_model.set(model);
+    });
+
+    let on_gen_mode_change = Callback::new(move |mode: String| {
+        set_gen_mode.set(mode);
     });
 
     let on_toggle_chat = Callback::new(move |_: ()| {
@@ -169,6 +374,7 @@ fn App() -> impl IntoView {
 
     // Status message signal (shown briefly for errors/warnings)
     let (status_message, set_status_message) = signal(Option::<String>::None);
+    let (status_msg_id, set_status_msg_id) = signal(0u32);
 
     // Mirror/symmetry mode
     let (mirror_x, set_mirror_x) = signal(false);
@@ -183,8 +389,45 @@ fn App() -> impl IntoView {
     let (onion_skin, set_onion_skin) = signal(false);
     let (onion_skin_frames, set_onion_skin_frames) = signal(1u32);
 
+    // Project list panel
+    let (show_project_list, set_show_project_list) = signal(false);
+    let (current_project_id, set_current_project_id) = signal(initial_project_id.clone());
+
     // Custom export filename
     let (export_filename, set_export_filename) = signal("pxlot".to_string());
+    // Public toggle
+    let (is_public, set_is_public) = signal(false);
+
+    // Unsaved changes tracking
+    let (dirty, set_dirty) = signal(false);
+    let (show_unsaved_warning, set_show_unsaved_warning) = signal(false);
+
+    // Load project from server if an ID was provided
+    if let Some(id) = initial_project_id {
+        leptos::task::spawn_local(async move {
+            match project_api::get_project(&id).await {
+                Ok(project) => {
+                    match serde_json::from_value::<pxlot_animation::Timeline>(project.data) {
+                        Ok(timeline) => {
+                            let canvas = timeline.current_canvas().clone();
+                            editor.update_value(|state| {
+                                state.canvas = canvas;
+                                state.timeline = timeline;
+                                state.history = pxlot_core::history::History::new();
+                                state.needs_center = true;
+                            });
+                            set_export_filename.set(project.name);
+                            set_is_public.set(project.is_public.unwrap_or(false));
+                            set_render_trigger.update(|v| *v += 1);
+                            log::info!("Project loaded from server");
+                        }
+                        Err(e) => log::error!("Failed to parse project data: {e}"),
+                    }
+                }
+                Err(e) => log::error!("Failed to load project: {e}"),
+            }
+        });
+    }
 
     // New canvas dialog
     let (show_new_dialog, set_show_new_dialog) = signal(false);
@@ -215,6 +458,7 @@ fn App() -> impl IntoView {
                         visible: l.visible,
                         locked: l.locked,
                         opacity: l.opacity,
+                        blend_mode: l.blend_mode,
                     })
                     .collect(),
             );
@@ -239,11 +483,33 @@ fn App() -> impl IntoView {
     let trigger_render = move || {
         set_render_trigger.update(|v| *v += 1);
         sync_state();
+        set_dirty.set(true);
         // Auto-save
         editor.with_value(|state| {
             storage::autosave(&state.canvas, &state.history);
         });
     };
+
+    // Sync UI state whenever render_trigger changes (covers agent-driven updates)
+    Effect::new(move |_| {
+        let _ = render_trigger.get(); // subscribe to changes
+        sync_state();
+    });
+
+    // Warn on browser tab close if unsaved changes
+    Effect::new(move |_| {
+        let is_dirty = dirty.get();
+        let window = web_sys::window().unwrap();
+        if is_dirty {
+            let cb = Closure::wrap(Box::new(move |ev: web_sys::BeforeUnloadEvent| {
+                ev.prevent_default();
+            }) as Box<dyn FnMut(_)>);
+            window.set_onbeforeunload(Some(cb.as_ref().unchecked_ref()));
+            cb.forget();
+        } else {
+            window.set_onbeforeunload(None);
+        }
+    });
 
     // Sync tool/color changes to editor state
     Effect::new(move |_| {
@@ -315,8 +581,8 @@ fn App() -> impl IntoView {
     let do_export_png = move || {
         let scale = png_scale.get();
         let filename = format!("{}.png", export_filename.get());
-        editor.with_value(|state| {
-            match png_format::export_png_scaled(&state.canvas, scale) {
+        editor.with_value(
+            |state| match png_format::export_png_scaled(&state.canvas, scale) {
                 Ok(data) => {
                     download_bytes(&data, &filename, "image/png");
                 }
@@ -324,8 +590,8 @@ fn App() -> impl IntoView {
                     log::error!("PNG export failed: {}", e);
                     set_status_message.set(Some(format!("PNG export failed: {}", e)));
                 }
-            }
-        });
+            },
+        );
     };
 
     // GIF export handler
@@ -334,76 +600,153 @@ fn App() -> impl IntoView {
         editor.update_value(|state| {
             state.save_frame(); // ensure current frame is saved
         });
-        editor.with_value(|state| {
-            match gif_format::export_gif(&state.timeline) {
-                Ok(data) => {
-                    download_bytes(&data, &filename, "image/gif");
-                }
-                Err(e) => {
-                    log::error!("GIF export failed: {}", e);
-                    set_status_message.set(Some(format!("GIF export failed: {}", e)));
-                }
+        editor.with_value(|state| match gif_format::export_gif(&state.timeline) {
+            Ok(data) => {
+                download_bytes(&data, &filename, "image/gif");
+            }
+            Err(e) => {
+                log::error!("GIF export failed: {}", e);
+                set_status_message.set(Some(format!("GIF export failed: {}", e)));
             }
         });
     };
 
-    // Project save handler
+    // Project save handler (server API)
     let do_save_project = move || {
         editor.update_value(|state| {
             state.save_frame();
         });
-        editor.with_value(|state| {
-            let now = js_sys::Date::now();
-            let data = project_store::ProjectData {
-                meta: project_store::ProjectMeta {
-                    name: "default".to_string(),
-                    width: state.canvas.frame_width(),
-                    height: state.canvas.frame_height(),
-                    frame_count: state.timeline.frame_count(),
-                    created_at: now,
-                    updated_at: now,
-                },
-                timeline: state.timeline.clone(),
+        let save_data = editor.with_value(|state| {
+            use base64::Engine;
+            let name = export_filename.get();
+            let w = state.canvas.frame_width() as i32;
+            let h = state.canvas.frame_height() as i32;
+            let fc = state.timeline.frame_count() as i32;
+            let data = match serde_json::to_value(&state.timeline) {
+                Ok(v) => v,
+                Err(e) => {
+                    log::error!("Failed to serialize timeline: {e}");
+                    return None;
+                }
             };
-            let Some(json) = project_store::serialize(&data) else { return };
-            match project_store::check_size(json.len()) {
-                project_store::SizeWarning::Exceeded(size) => {
-                    log::error!(
-                        "Project too large to save: {} MB",
-                        size / (1024 * 1024)
-                    );
+            // Generate PNG thumbnail from first frame
+            let thumb = png_format::export_png_scaled(&state.canvas, 1)
+                .ok()
+                .map(|png_bytes| base64::engine::general_purpose::STANDARD.encode(&png_bytes));
+            // Generate animated GIF thumbnail if multiple frames
+            let gif_thumb = if state.timeline.frame_count() > 1 {
+                gif_format::export_gif(&state.timeline)
+                    .ok()
+                    .map(|gif_bytes| base64::engine::general_purpose::STANDARD.encode(&gif_bytes))
+            } else {
+                None
+            };
+            // Generate per-frame thumbnails
+            let frame_thumbnails: Vec<String> = state
+                .timeline
+                .frames
+                .iter()
+                .map(|frame| {
+                    png_format::export_png_scaled(&frame.canvas, 1)
+                        .map(|png_bytes| {
+                            base64::engine::general_purpose::STANDARD.encode(&png_bytes)
+                        })
+                        .unwrap_or_default()
+                })
+                .collect();
+            let ft_json = if frame_thumbnails.len() > 1 {
+                serde_json::to_value(&frame_thumbnails).ok()
+            } else {
+                None
+            };
+            Some((name, w, h, fc, data, thumb, gif_thumb, ft_json))
+        });
+        let Some((
+            name,
+            width,
+            height,
+            frame_count,
+            timeline_json,
+            thumbnail,
+            thumbnail_gif,
+            frame_thumbs,
+        )) = save_data
+        else {
+            set_status_message.set(Some("Save failed: serialization error".to_string()));
+            return;
+        };
+        let project_id = current_project_id.get();
+        let public = is_public.get();
+        leptos::task::spawn_local(async move {
+            let req = project_api::SaveProjectRequest {
+                name: name.clone(),
+                width,
+                height,
+                frame_count,
+                thumbnail,
+                thumbnail_gif,
+                is_public: Some(public),
+                frame_thumbnails: frame_thumbs,
+                data: timeline_json,
+            };
+            let result = if let Some(id) = &project_id {
+                project_api::update_project(id, &req).await
+            } else {
+                project_api::create_project(&req).await
+            };
+            match result {
+                Ok(meta) => {
+                    set_url_project_id(Some(&meta.id));
+                    set_current_project_id.set(Some(meta.id));
+                    set_dirty.set(false);
+                    log::info!("Project '{}' saved to server", meta.name);
                 }
-                project_store::SizeWarning::Warn(size) => {
-                    log::warn!(
-                        "Project is large: {} MB. Consider reducing layers/frames.",
-                        size / (1024 * 1024)
-                    );
-                    project_store::save_project(data.meta.name.clone(), json);
-                }
-                project_store::SizeWarning::Ok => {
-                    project_store::save_project(data.meta.name.clone(), json);
+                Err(e) => {
+                    log::error!("Failed to save project: {e}");
+                    set_status_message.set(Some(format!("Save failed: {e}")));
                 }
             }
         });
     };
 
-    // Project load handler
-    let do_load_project = move || {
-        project_store::load_project("default".to_string(), move |project| {
-            if let Some(data) = project {
-                let canvas = data.timeline.current_canvas().clone();
-                editor.update_value(|state| {
-                    state.canvas = canvas;
-                    state.timeline = data.timeline;
-                    state.history = pxlot_core::history::History::new();
-                });
-                trigger_render();
-                log::info!("Project loaded from IndexedDB");
-            } else {
-                log::info!("No saved project found");
+    // Project open handler (from project list)
+    let on_open_project = Callback::new(move |id: String| {
+        set_show_project_list.set(false);
+        leptos::task::spawn_local(async move {
+            match project_api::get_project(&id).await {
+                Ok(project) => {
+                    // Deserialize timeline from data payload
+                    match serde_json::from_value::<pxlot_animation::Timeline>(project.data) {
+                        Ok(timeline) => {
+                            let canvas = timeline.current_canvas().clone();
+                            editor.update_value(|state| {
+                                state.canvas = canvas;
+                                state.timeline = timeline;
+                                state.history = pxlot_core::history::History::new();
+                                state.needs_center = true;
+                            });
+                            set_url_project_id(Some(&id));
+                            set_current_project_id.set(Some(id));
+                            set_export_filename.set(project.name);
+                            set_is_public.set(project.is_public.unwrap_or(false));
+                            set_render_trigger.update(|v| *v += 1);
+                            log::info!("Project loaded from server");
+                        }
+                        Err(e) => {
+                            log::error!("Failed to parse project data: {e}");
+                        }
+                    }
+                }
+                Err(e) => {
+                    log::error!("Failed to load project: {e}");
+                }
             }
         });
-    };
+    });
+
+    let on_close_project_list = Callback::new(move |_: ()| {
+        set_show_project_list.set(false);
+    });
 
     // PNG import handler
     let file_input_ref = NodeRef::<leptos::html::Input>::new();
@@ -416,9 +759,13 @@ fn App() -> impl IntoView {
     };
 
     let on_file_selected = move |_ev: web_sys::Event| {
-        let Some(input) = file_input_ref.get() else { return };
+        let Some(input) = file_input_ref.get() else {
+            return;
+        };
         let html_input: &web_sys::HtmlInputElement = input.as_ref();
-        let Some(files) = html_input.files() else { return };
+        let Some(files) = html_input.files() else {
+            return;
+        };
         let Some(file) = files.get(0) else { return };
 
         let reader = web_sys::FileReader::new().unwrap();
@@ -521,6 +868,61 @@ fn App() -> impl IntoView {
         trigger_render();
     });
 
+    let on_layer_blend_mode = Callback::new(move |args: (usize, pxlot_core::BlendMode)| {
+        let (idx, mode) = args;
+        editor.update_value(|state| {
+            state.canvas.set_layer_blend_mode(idx, mode);
+        });
+        trigger_render();
+    });
+
+    // ── Transform operations ────────────────────────────────
+
+    let on_flip_horizontal = move || {
+        editor.update_value(|state| {
+            let mut cmd = Command::new("flip_horizontal");
+            pxlot_tools::flip_horizontal(&mut state.canvas, &mut cmd);
+            if !cmd.is_empty() {
+                state.history.push(cmd);
+            }
+        });
+        trigger_render();
+    };
+
+    let on_flip_vertical = move || {
+        editor.update_value(|state| {
+            let mut cmd = Command::new("flip_vertical");
+            pxlot_tools::flip_vertical(&mut state.canvas, &mut cmd);
+            if !cmd.is_empty() {
+                state.history.push(cmd);
+            }
+        });
+        trigger_render();
+    };
+
+    let on_rotate_90 = move || {
+        editor.update_value(|state| {
+            let mut cmd = Command::new("rotate_90");
+            pxlot_tools::rotate_90(&mut state.canvas, &mut cmd);
+            if !cmd.is_empty() {
+                state.history.push(cmd);
+            }
+        });
+        trigger_render();
+    };
+
+    let on_auto_outline = move || {
+        let color = current_color.get();
+        editor.update_value(|state| {
+            let mut cmd = Command::new("auto_outline");
+            pxlot_tools::draw_outline(&mut state.canvas, color, &mut cmd);
+            if !cmd.is_empty() {
+                state.history.push(cmd);
+            }
+        });
+        trigger_render();
+    };
+
     // Sprite sheet export handler
     let do_export_spritesheet = move || {
         let filename = format!("{}_sheet.png", export_filename.get());
@@ -529,7 +931,9 @@ fn App() -> impl IntoView {
         });
         editor.with_value(|state| {
             let frame_count = state.timeline.frame_count();
-            if frame_count == 0 { return; }
+            if frame_count == 0 {
+                return;
+            }
             let fw = state.canvas.frame_width();
             let fh = state.canvas.frame_height();
             // Lay out frames horizontally
@@ -545,7 +949,9 @@ fn App() -> impl IntoView {
                     for x in 0..fw {
                         let color = *flat.get_pixel(x, y).unwrap_or(&Color::TRANSPARENT);
                         if color.a > 0 {
-                            sheet_canvas.layers[0].buffer.set_pixel(sfx + ox + x, sfy + y, color);
+                            sheet_canvas.layers[0]
+                                .buffer
+                                .set_pixel(sfx + ox + x, sfy + y, color);
                         }
                     }
                 }
@@ -657,35 +1063,37 @@ fn App() -> impl IntoView {
     });
 
     // AI panel callbacks
-    let on_pixelize = Callback::new(move |(w, h, colors, dither): (u32, u32, usize, DitherMethod)| {
-        set_ai_result.set(AiResult {
-            palette_hex: vec![],
-            style_comment: String::new(),
-            status: AiStatus::Loading,
-        });
-        editor.update_value(|state| {
-            let params = image_processing::PixelizeParams {
-                target_width: w,
-                target_height: h,
-                max_colors: colors,
-                dither,
-                downsample: DownsampleMethod::NearestNeighbor,
-                palette: None,
-            };
-            let flat = state.canvas.flatten_frame();
-            let (result, _palette) = image_processing::pixelize(&flat, &params);
-            let new_canvas = image_processing::buffer_to_canvas(result);
-            state.timeline = pxlot_animation::Timeline::new(new_canvas.clone());
-            state.canvas = new_canvas;
-            state.history = pxlot_core::history::History::new();
-        });
-        set_ai_result.set(AiResult {
-            palette_hex: vec![],
-            style_comment: "Pixelization complete.".to_string(),
-            status: AiStatus::Success,
-        });
-        trigger_render();
-    });
+    let on_pixelize = Callback::new(
+        move |(w, h, colors, dither): (u32, u32, usize, DitherMethod)| {
+            set_ai_result.set(AiResult {
+                palette_hex: vec![],
+                style_comment: String::new(),
+                status: AiStatus::Loading,
+            });
+            editor.update_value(|state| {
+                let params = image_processing::PixelizeParams {
+                    target_width: w,
+                    target_height: h,
+                    max_colors: colors,
+                    dither,
+                    downsample: DownsampleMethod::NearestNeighbor,
+                    palette: None,
+                };
+                let flat = state.canvas.flatten_frame();
+                let (result, _palette) = image_processing::pixelize(&flat, &params);
+                let new_canvas = image_processing::buffer_to_canvas(result);
+                state.timeline = pxlot_animation::Timeline::new(new_canvas.clone());
+                state.canvas = new_canvas;
+                state.history = pxlot_core::history::History::new();
+            });
+            set_ai_result.set(AiResult {
+                palette_hex: vec![],
+                style_comment: "Pixelization complete.".to_string(),
+                status: AiStatus::Success,
+            });
+            trigger_render();
+        },
+    );
 
     let on_extract_palette = Callback::new(move |colors: usize| {
         set_ai_result.set(AiResult {
@@ -697,10 +1105,7 @@ fn App() -> impl IntoView {
             let flat = state.canvas.flatten_frame();
             image_processing::extract_palette(&flat, colors)
         });
-        let hex_colors: Vec<String> = palette
-            .iter()
-            .map(|c| c.to_hex())
-            .collect();
+        let hex_colors: Vec<String> = palette.iter().map(|c| c.to_hex()).collect();
         set_ai_result.set(AiResult {
             palette_hex: hex_colors,
             style_comment: format!("Extracted {} colors.", palette.len()),
@@ -728,6 +1133,16 @@ fn App() -> impl IntoView {
 
     // Keyboard shortcuts
     let on_keydown = move |ev: web_sys::KeyboardEvent| {
+        // Skip shortcuts when focus is in a text input or textarea
+        if let Some(target) = ev.target() {
+            if let Some(el) = target.dyn_ref::<web_sys::HtmlElement>() {
+                let tag = el.tag_name().to_ascii_uppercase();
+                if tag == "TEXTAREA" || tag == "INPUT" {
+                    return;
+                }
+            }
+        }
+
         let key = ev.key();
         let ctrl = ev.ctrl_key() || ev.meta_key();
         let shift = ev.shift_key();
@@ -743,7 +1158,7 @@ fn App() -> impl IntoView {
             }
             "s" | "S" if ctrl => {
                 ev.prevent_default();
-                do_export_png();
+                do_save_project();
             }
             "n" | "N" if ctrl => {
                 ev.prevent_default();
@@ -784,8 +1199,17 @@ fn App() -> impl IntoView {
                         if let Some(layer) = state.canvas.active_layer_ref() {
                             for y in sy..(sy + sh) {
                                 for x in sx..(sx + sw) {
-                                    if x >= 0 && y >= 0 && (x as u32) < state.canvas.width && (y as u32) < state.canvas.height {
-                                        pixels.push(*layer.buffer.get_pixel(x as u32, y as u32).unwrap_or(&Color::TRANSPARENT));
+                                    if x >= 0
+                                        && y >= 0
+                                        && (x as u32) < state.canvas.width
+                                        && (y as u32) < state.canvas.height
+                                    {
+                                        pixels.push(
+                                            *layer
+                                                .buffer
+                                                .get_pixel(x as u32, y as u32)
+                                                .unwrap_or(&Color::TRANSPARENT),
+                                        );
                                     } else {
                                         pixels.push(Color::TRANSPARENT);
                                     }
@@ -806,16 +1230,30 @@ fn App() -> impl IntoView {
                 editor.update_value(|state| {
                     let clip = state.clipboard.clone();
                     if let Some(clip) = clip {
-                        let default_paste = (state.canvas.frame_x as i32, state.canvas.frame_y as i32);
-                        let (ox, oy) = state.selection.map(|(x, y, _, _)| (x, y)).unwrap_or(default_paste);
+                        let default_paste =
+                            (state.canvas.frame_x as i32, state.canvas.frame_y as i32);
+                        let (ox, oy) = state
+                            .selection
+                            .map(|(x, y, _, _)| (x, y))
+                            .unwrap_or(default_paste);
                         let mut cmd = pxlot_core::history::Command::new("Paste");
                         for cy in 0..clip.height {
                             for cx in 0..clip.width {
                                 let px = ox + cx as i32;
                                 let py = oy + cy as i32;
-                                if px >= 0 && py >= 0 && (px as u32) < state.canvas.width && (py as u32) < state.canvas.height {
+                                if px >= 0
+                                    && py >= 0
+                                    && (px as u32) < state.canvas.width
+                                    && (py as u32) < state.canvas.height
+                                {
                                     let color = clip.pixels[(cy * clip.width + cx) as usize];
-                                    pxlot_tools::pencil_pixel(&mut state.canvas, px as u32, py as u32, color, &mut cmd);
+                                    pxlot_tools::pencil_pixel(
+                                        &mut state.canvas,
+                                        px as u32,
+                                        py as u32,
+                                        color,
+                                        &mut cmd,
+                                    );
                                 }
                             }
                         }
@@ -834,10 +1272,25 @@ fn App() -> impl IntoView {
                         if let Some(_) = state.canvas.active_layer_ref() {
                             for y in sy..(sy + sh) {
                                 for x in sx..(sx + sw) {
-                                    if x >= 0 && y >= 0 && (x as u32) < state.canvas.width && (y as u32) < state.canvas.height {
+                                    if x >= 0
+                                        && y >= 0
+                                        && (x as u32) < state.canvas.width
+                                        && (y as u32) < state.canvas.height
+                                    {
                                         let layer = &state.canvas.layers[state.canvas.active_layer];
-                                        pixels.push(*layer.buffer.get_pixel(x as u32, y as u32).unwrap_or(&Color::TRANSPARENT));
-                                        pxlot_tools::pencil_pixel(&mut state.canvas, x as u32, y as u32, Color::TRANSPARENT, &mut cmd);
+                                        pixels.push(
+                                            *layer
+                                                .buffer
+                                                .get_pixel(x as u32, y as u32)
+                                                .unwrap_or(&Color::TRANSPARENT),
+                                        );
+                                        pxlot_tools::pencil_pixel(
+                                            &mut state.canvas,
+                                            x as u32,
+                                            y as u32,
+                                            Color::TRANSPARENT,
+                                            &mut cmd,
+                                        );
                                     } else {
                                         pixels.push(Color::TRANSPARENT);
                                     }
@@ -864,6 +1317,10 @@ fn App() -> impl IntoView {
                 });
                 trigger_render();
             }
+            "H" if !ctrl && shift => on_flip_horizontal(),
+            "V" if !ctrl && shift => on_flip_vertical(),
+            "T" if !ctrl && shift => on_rotate_90(),
+            "Q" if !ctrl && shift => on_auto_outline(),
             _ => {}
         }
     };
@@ -934,11 +1391,19 @@ fn App() -> impl IntoView {
                     <button class="menu-btn" on:click=on_import_click title="Import PNG">
                         {move || t(lang.get(), "import")}
                     </button>
+                    <label class="public-toggle" title="Publish to gallery">
+                        <input
+                            type="checkbox"
+                            prop:checked=move || is_public.get()
+                            on:change=move |ev| {
+                                let checked: bool = event_target_checked(&ev);
+                                set_is_public.set(checked);
+                            }
+                        />
+                        "Public"
+                    </label>
                     <button class="menu-btn" on:click=move |_| do_save_project() title="Save Project">
                         {move || t(lang.get(), "save_project")}
-                    </button>
-                    <button class="menu-btn" on:click=move |_| do_load_project() title="Load Project">
-                        {move || t(lang.get(), "load_project")}
                     </button>
                     <input
                         node_ref=file_input_ref
@@ -952,6 +1417,19 @@ fn App() -> impl IntoView {
                     </button>
                     <button class="menu-btn" on:click=move |_| on_redo() title="Redo (Ctrl+Shift+Z)">
                         {move || t(lang.get(), "redo")}
+                    </button>
+                    <span class="menu-separator">"|"</span>
+                    <button class="menu-btn" on:click=move |_| on_flip_horizontal() title="Flip Horizontal (Shift+H)">
+                        "\u{2194}"
+                    </button>
+                    <button class="menu-btn" on:click=move |_| on_flip_vertical() title="Flip Vertical (Shift+V)">
+                        "\u{2195}"
+                    </button>
+                    <button class="menu-btn" on:click=move |_| on_rotate_90() title="Rotate 90° CW (Shift+T)">
+                        "\u{21bb}"
+                    </button>
+                    <button class="menu-btn" on:click=move |_| on_auto_outline() title="Auto Outline (Shift+Q, uses current color)">
+                        "\u{25ef}"
                     </button>
                     <label class="menu-checkbox">
                         <input
@@ -1006,6 +1484,19 @@ fn App() -> impl IntoView {
                     >
                         {move || lang.get().label()}
                     </button>
+                    <button
+                        class="menu-btn"
+                        on:click=move |_| {
+                            if dirty.get() {
+                                set_show_unsaved_warning.set(true);
+                            } else {
+                                on_back.run(());
+                            }
+                        }
+                        title="Back to Projects"
+                    >
+                        "Projects"
+                    </button>
                 </div>
             </header>
             <main class="workspace">
@@ -1018,19 +1509,19 @@ fn App() -> impl IntoView {
                 <AiChat
                     messages=chat_messages
                     is_running=ai_running
-                    has_api_key=ai_has_key
                     is_open=chat_open
                     on_close=on_close_chat
                     on_send=on_chat_send
                     on_stop=on_chat_stop
                     on_clear=on_chat_clear
-                    on_save_api_key=on_chat_save_key
                     on_model_change=on_chat_model_change
                     model=ai_model
                     token_usage=ai_token_usage
+                    gen_mode=gen_mode
+                    on_gen_mode_change=on_gen_mode_change
                 />
                 <div class="canvas-area">
-                    <CanvasView editor=editor render_trigger=render_trigger set_color=set_current_color />
+                    <CanvasView editor=editor render_trigger=render_trigger set_color=set_current_color set_dirty=set_dirty />
                 </div>
                 <aside class="right-panel">
                     <LayerPanel
@@ -1043,6 +1534,7 @@ fn App() -> impl IntoView {
                         on_opacity_change=on_layer_opacity
                         on_move_up=on_layer_move_up
                         on_move_down=on_layer_move_down
+                        on_blend_mode_change=on_layer_blend_mode
                     />
                     <ColorPicker
                         current_color=current_color
@@ -1076,6 +1568,37 @@ fn App() -> impl IntoView {
                 on_toggle_onion_skin=on_toggle_onion_skin
                 on_onion_skin_frames_change=on_onion_skin_frames_change
             />
+            // Unsaved Changes Warning
+            {move || {
+                if show_unsaved_warning.get() {
+                    Some(view! {
+                        <div class="modal-overlay" on:click=move |_| set_show_unsaved_warning.set(false)>
+                            <div class="modal-dialog modal-delete-confirm" on:click=move |ev: web_sys::MouseEvent| ev.stop_propagation()>
+                                <h3>"Unsaved Changes"</h3>
+                                <p class="modal-delete-msg">"You have unsaved changes. What would you like to do?"</p>
+                                <div class="modal-actions">
+                                    <button class="menu-btn" on:click=move |_| {
+                                        set_show_unsaved_warning.set(false);
+                                    }>"Cancel"</button>
+                                    <button class="menu-btn" on:click=move |_| {
+                                        set_show_unsaved_warning.set(false);
+                                        set_dirty.set(false);
+                                        on_back.run(());
+                                    }>"Discard"</button>
+                                    <button class="menu-btn" style="color: var(--accent);" on:click=move |_| {
+                                        set_show_unsaved_warning.set(false);
+                                        do_save_project();
+                                        on_back.run(());
+                                    }>"Save & Exit"</button>
+                                </div>
+                            </div>
+                        </div>
+                    })
+                } else {
+                    None
+                }
+            }}
+
             // New Canvas Dialog
             {move || {
                 if show_new_dialog.get() {
@@ -1195,13 +1718,23 @@ fn App() -> impl IntoView {
                     None
                 }
             }}
+            <ProjectList
+                is_open=show_project_list
+                on_close=on_close_project_list
+                on_open=on_open_project
+            />
             <footer class="status-bar">
                 {move || {
                     status_message.get().map(|msg| {
-                        // Auto-clear after showing
                         let set_msg = set_status_message;
+                        let current_id = status_msg_id.get();
+                        let next_id = current_id.wrapping_add(1);
+                        set_status_msg_id.set(next_id);
                         let cb = Closure::wrap(Box::new(move || {
-                            set_msg.set(None);
+                            // Only clear if this is still the active message
+                            if status_msg_id.get() == next_id {
+                                set_msg.set(None);
+                            }
                         }) as Box<dyn FnMut()>);
                         let window = web_sys::window().unwrap();
                         let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(

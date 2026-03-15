@@ -1,4 +1,5 @@
 use leptos::prelude::*;
+use pxlot_core::BlendMode;
 
 /// Layer info for display (extracted from Canvas to avoid borrow issues).
 #[derive(Clone, Debug)]
@@ -6,8 +7,10 @@ pub struct LayerInfo {
     pub index: usize,
     pub name: String,
     pub visible: bool,
+    #[allow(dead_code)]
     pub locked: bool,
     pub opacity: u8,
+    pub blend_mode: BlendMode,
 }
 
 #[component]
@@ -21,6 +24,7 @@ pub fn LayerPanel(
     on_opacity_change: Callback<(usize, u8)>,
     on_move_up: Callback<usize>,
     on_move_down: Callback<usize>,
+    on_blend_mode_change: Callback<(usize, BlendMode)>,
 ) -> impl IntoView {
     view! {
         <div class="panel-section layer-panel-section" role="region" aria-label="Layers">
@@ -43,6 +47,13 @@ pub fn LayerPanel(
                         let name = info.name.clone();
                         let visible = info.visible;
                         let opacity = info.opacity;
+                        let blend_mode = info.blend_mode;
+                        let blend_mode_str = match blend_mode {
+                            BlendMode::Normal => "normal",
+                            BlendMode::Multiply => "multiply",
+                            BlendMode::Screen => "screen",
+                            BlendMode::Overlay => "overlay",
+                        };
                         view! {
                             <div
                                 class="layer-item"
@@ -60,6 +71,26 @@ pub fn LayerPanel(
                                     {if visible { "V" } else { "-" }}
                                 </button>
                                 <span class="layer-name">{name}</span>
+                                <select
+                                    class="layer-blend-mode"
+                                    title="Blend Mode"
+                                    on:change=move |ev| {
+                                        ev.stop_propagation();
+                                        let mode = match event_target_value(&ev).as_str() {
+                                            "multiply" => BlendMode::Multiply,
+                                            "screen" => BlendMode::Screen,
+                                            "overlay" => BlendMode::Overlay,
+                                            _ => BlendMode::Normal,
+                                        };
+                                        on_blend_mode_change.run((idx, mode));
+                                    }
+                                    on:click=move |ev| ev.stop_propagation()
+                                >
+                                    <option value="normal" selected=move || blend_mode_str == "normal">"N"</option>
+                                    <option value="multiply" selected=move || blend_mode_str == "multiply">"Mul"</option>
+                                    <option value="screen" selected=move || blend_mode_str == "screen">"Scr"</option>
+                                    <option value="overlay" selected=move || blend_mode_str == "overlay">"Ovr"</option>
+                                </select>
                                 <input
                                     type="range"
                                     class="layer-opacity"

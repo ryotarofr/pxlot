@@ -20,10 +20,7 @@ pub enum ChatContent {
     /// Plain text message.
     Text(String),
     /// Tool call being executed (shown in UI as status).
-    ToolUse {
-        name: String,
-        status: ToolStatus,
-    },
+    ToolUse { name: String, status: ToolStatus },
     /// Informational status (e.g. "Generating...", errors).
     Status(String),
 }

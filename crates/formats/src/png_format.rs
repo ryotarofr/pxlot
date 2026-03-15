@@ -43,7 +43,9 @@ pub fn export_png_scaled(canvas: &Canvas, scale: u32) -> Result<Vec<u8>, String>
         encoder.set_color(png::ColorType::Rgba);
         encoder.set_depth(png::BitDepth::Eight);
         let mut writer = encoder.write_header().map_err(|e| e.to_string())?;
-        writer.write_image_data(&scaled).map_err(|e| e.to_string())?;
+        writer
+            .write_image_data(&scaled)
+            .map_err(|e| e.to_string())?;
     }
     Ok(buf)
 }
@@ -82,7 +84,9 @@ pub fn import_png_with_limit(data: &[u8], max_dim: u32) -> Result<Canvas, String
     let mut reader = decoder.read_info().map_err(|e| e.to_string())?;
 
     let mut img_data = vec![0u8; reader.output_buffer_size()];
-    let info = reader.next_frame(&mut img_data).map_err(|e| e.to_string())?;
+    let info = reader
+        .next_frame(&mut img_data)
+        .map_err(|e| e.to_string())?;
 
     let src_w = info.width;
     let src_h = info.height;
@@ -110,9 +114,16 @@ pub fn import_png_with_limit(data: &[u8], max_dim: u32) -> Result<Canvas, String
         for y in 0..h {
             for x in 0..w {
                 let i = ((y * w + x) * 4) as usize;
-                layer.buffer.set_pixel(fx0 + x, fy0 + y, Color::new(
-                    src_rgba[i], src_rgba[i + 1], src_rgba[i + 2], src_rgba[i + 3],
-                ));
+                layer.buffer.set_pixel(
+                    fx0 + x,
+                    fy0 + y,
+                    Color::new(
+                        src_rgba[i],
+                        src_rgba[i + 1],
+                        src_rgba[i + 2],
+                        src_rgba[i + 3],
+                    ),
+                );
             }
         }
     } else {
@@ -122,9 +133,16 @@ pub fn import_png_with_limit(data: &[u8], max_dim: u32) -> Result<Canvas, String
             for x in 0..w {
                 let src_x = (x as f64 / w as f64 * src_w as f64) as u32;
                 let i = ((src_y * src_w + src_x) * 4) as usize;
-                layer.buffer.set_pixel(fx0 + x, fy0 + y, Color::new(
-                    src_rgba[i], src_rgba[i + 1], src_rgba[i + 2], src_rgba[i + 3],
-                ));
+                layer.buffer.set_pixel(
+                    fx0 + x,
+                    fy0 + y,
+                    Color::new(
+                        src_rgba[i],
+                        src_rgba[i + 1],
+                        src_rgba[i + 2],
+                        src_rgba[i + 3],
+                    ),
+                );
             }
         }
     }
@@ -133,7 +151,12 @@ pub fn import_png_with_limit(data: &[u8], max_dim: u32) -> Result<Canvas, String
 }
 
 /// Decode raw PNG frame data to RGBA regardless of source color type.
-fn decode_to_rgba(img_data: &[u8], w: u32, h: u32, color_type: png::ColorType) -> Result<Vec<u8>, String> {
+fn decode_to_rgba(
+    img_data: &[u8],
+    w: u32,
+    h: u32,
+    color_type: png::ColorType,
+) -> Result<Vec<u8>, String> {
     let size = (w * h) as usize;
     let mut rgba = vec![0u8; size * 4];
 
@@ -201,7 +224,9 @@ mod tests {
         let fx = canvas.frame_x;
         let fy = canvas.frame_y;
         canvas.layers[0].buffer.set_pixel(fx + 1, fy + 1, red);
-        canvas.layers[0].buffer.set_pixel(fx + 2, fy + 3, Color::new(0, 255, 0, 128));
+        canvas.layers[0]
+            .buffer
+            .set_pixel(fx + 2, fy + 3, Color::new(0, 255, 0, 128));
 
         let png_data = export_png(&canvas).unwrap();
         assert!(!png_data.is_empty());
@@ -212,7 +237,10 @@ mod tests {
         // After import, pixel is at frame (1,1) = buffer (frame_x+1, frame_y+1)
         let ifx = imported.frame_x;
         let ify = imported.frame_y;
-        assert_eq!(imported.layers[0].buffer.get_pixel(ifx + 1, ify + 1), Some(&red));
+        assert_eq!(
+            imported.layers[0].buffer.get_pixel(ifx + 1, ify + 1),
+            Some(&red)
+        );
     }
 
     #[test]
@@ -220,7 +248,9 @@ mod tests {
         let mut canvas = Canvas::new(2, 2);
         let red = Color::new(255, 0, 0, 255);
         // Set pixel at frame (0,0)
-        canvas.layers[0].buffer.set_pixel(canvas.frame_x, canvas.frame_y, red);
+        canvas.layers[0]
+            .buffer
+            .set_pixel(canvas.frame_x, canvas.frame_y, red);
 
         let png_data = export_png_scaled(&canvas, 4).unwrap();
         let imported = import_png(&png_data).unwrap();
@@ -230,8 +260,14 @@ mod tests {
         let ifx = imported.frame_x;
         let ify = imported.frame_y;
         assert_eq!(imported.layers[0].buffer.get_pixel(ifx, ify), Some(&red));
-        assert_eq!(imported.layers[0].buffer.get_pixel(ifx + 3, ify + 3), Some(&red));
-        assert_eq!(imported.layers[0].buffer.get_pixel(ifx + 4, ify), Some(&Color::TRANSPARENT));
+        assert_eq!(
+            imported.layers[0].buffer.get_pixel(ifx + 3, ify + 3),
+            Some(&red)
+        );
+        assert_eq!(
+            imported.layers[0].buffer.get_pixel(ifx + 4, ify),
+            Some(&Color::TRANSPARENT)
+        );
     }
 
     #[test]
